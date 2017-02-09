@@ -1,0 +1,4 @@
+name = Reporte Diario de la Flota
+description = Reporte Diario de la Flota Semanal para Pesca Azteca.
+core = 7.x
+package = Mazpesca

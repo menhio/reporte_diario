@@ -1,0 +1,2253 @@
+<?php
+
+/*
+ * Implements hook_permission()
+ */
+function reporte_flota_permission() {
+  return array(
+    'acceso_reporte_diario_flota' => array(
+      'title' => t('Reporte Diario de la Flota'),
+      'description' => t('Administración de permisos del Reporte Diario de la Flota.'),
+    ),
+  );
+}
+
+/*
+ * Implements hook_menu()
+ */
+
+function reporte_flota_menu() {
+
+  $items['reportes/custom-form/diario-flota'] = array(
+    'title' => 'Reporte Diario de la Flota',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('reporte_flota_form'),
+    'type' => MENU_NORMAL_ITEM,
+    'access arguments' => array('acceso_reporte_diario_flota'),
+  );
+
+  $items['reportes/custom-page/excel-download'] = array(
+    'title' => 'Reporte Semanal en Excel',
+    'page callback' => 'reporte_flota_export_excel',
+    'type' => MENU_NORMAL_ITEM,
+    'access arguments' => array('acceso_reporte_diario_flota'),
+  );  
+  
+  $items['reporte/custom/excel-form'] = array(
+    'title' => 'Reporte Semanal en Excel',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('gen_excel_form'),
+    'type' => MENU_NORMAL_ITEM,
+    'access arguments' => array('acceso_reporte_diario_flota'),
+  );
+
+  $items['reportes/custom-page/diario-flota'] = array(
+    'title' => 'Reporte Diario de la Flota',
+    'description' => t('Reporte general de los barcos.'),
+    'type' => MENU_NORMAL_ITEM,
+    'page callback' => 'reporte_flota_reporte',
+    'access arguments' => array('acceso_reporte_diario_flota'),
+  );
+
+  return $items;
+}
+
+function getStartAndEndDate($week, $year) {
+  $dto = new DateTime();
+  $ret['week_start'] = $dto->setISODate($year, $week)->format('d-m-Y');
+  $ret['week_end'] = $dto->modify('+6 days')->format('d-m-Y');
+  return $ret;
+}
+
+/*
+ * Implements hook_form()
+ */
+
+function reporte_flota_form($form, &$form_state) {
+  $curr_week = ltrim(date('W'), 0);
+  $curr_year = date('Y');
+  $form = array();
+  
+  $weeks = array_combine(range(1, 52), range(1, 52));
+  
+  //$week1 = getStartAndEndDate(1, $curr_year);
+  //$weeks = array('1' => '1' . ' - ' . $week1['week_start'] . ' - ' . $week1['week_end']);
+  
+  $form['week'] = array(
+    '#title' => t('Semana'),
+    '#type' => 'select',
+    //'#size' => 2,
+    //'#maxlength' => 2,
+    '#options' => $weeks,
+    '#default_value' => $curr_week,
+    '#required' => TRUE,
+  );
+
+  $form['year'] = array(
+    '#title' => t('Año'),
+    '#type' => 'select',
+    '#options' => array(
+      '2016' => '2016',
+      '2017' => '2017'),
+    '#default_value' => $curr_year,
+  );
+
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Buscar'),
+  );
+  
+  $form['submit2'] = array(
+    '#type' => 'submit',
+    '#value' => t('Descargar'),
+    '#submit' => array('gen_excel_download_form'),
+  );
+
+  return $form;
+}
+
+/*
+ * Implements hook_form_validate()
+ */
+
+function reporte_flota_form_validate($form, &$form_state) {
+
+  if (!is_numeric($form_state['values']['week'])) {
+    form_set_error('week', t('Usar solo números enteros!'));
+  }
+
+  if ($form_state['values']['week'] == 0 || $form_state['values']['week'] >= 53) {
+    form_set_error('semana', t('Seleccionar una semana entre 1 o 52.'));
+  }
+
+}
+
+/*
+ * Implements hook_form_submit()
+ */
+
+function reporte_flota_form_submit($form, &$form_state) {
+  $week = $form_state['values']['week'];
+  $year = $form_state['values']['year'];
+
+  //drupal_set_message(t('La semana ' . $week . ' y el año ' . $year));
+  $form_state['redirect'] = array(
+      'reportes/custom-page/diario-flota',
+    array(
+      'query' => array(
+        'week' => $week,
+        'year' => $year,
+      ),
+    ),
+    );
+}
+
+/*
+ * Implements hook_form()
+ */
+
+function gen_excel_download_form($form, &$form_state) {
+  $week = $form_state['values']['week'];
+  $year = $form_state['values']['year'];
+
+  //drupal_set_message(t('La semana ' . $week . ' y el año ' . $year));
+  $form_state['redirect'] = array(
+      'reportes/custom-page/excel-download',
+    array(
+      'query' => array(
+        'week' => $week,
+        'year' => $year,
+      ),
+    ),
+    );
+}
+
+/*
+ * Implements hook_form()
+ */
+function gen_excel_form($form, &$form_state) {
+
+  $form = array();
+
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Descargar'),
+  );
+  //$form['#validate'][] = 'my_custom_validate_function';
+  $form['#submit'][] = 'reporte_flota_export_excel';
+
+  return $form;
+}
+
+/*
+ * Custom Page Callback
+ */
+
+function reporte_flota_reporte(){
+  $output = '';
+  $output .= reporteDiarioFlota();
+
+  return render($output);
+
+} 
+
+/*
+ * Converts Decimal Degrees to DMS
+ */
+
+function turnDDtoDMS($dec) {
+  // Converts decimal format to DMS ( Degrees / minutes / seconds )
+  //$deg = isset($deg) ? $deg : 0;
+  $vars = explode(".",$dec);
+  $deg = $vars[0];
+  $tempma = "0.".$vars[1];
+
+  $tempma = $tempma * 3600;
+  $min = floor($tempma / 60);
+  $sec = $tempma - ($min*60);
+
+  //return array("deg"=>$deg,"min"=>$min,"sec"=>$sec);
+  $degree = $deg . '.' . $min;
+  return abs($degree);
+}
+
+function getLastCoord($viaje_tid, $coord = 'lat') {
+  $table = 'coords_con_viajes_view';
+  $query = db_select($table, 'c');
+  $query->addField('c', 'coord_nid', 'coord_nid');
+  $query->addField('c', 'lat', 'lat');
+  $query->addField('c', 'lon', 'lon');
+  $query->addField('c', 'viaje_tid', 'viaje_tid');
+  $query->addField('c', 'viaje', 'viaje');
+  $query->addField('c', 'tax_id', 'tax_id');
+  $query->addField('c', 'viaje_tax', 'viaje_tax');
+
+  $query->condition('c.viaje_tid', $viaje_tid , '=');
+  $query->orderBy('coord_nid', 'DESC');
+  $query->range(0, 1);
+
+  $exeResults = $query->execute();
+  $results = $exeResults->fetchAll();
+  $coords = isset($results[0]->$coord) ? $results[0]->$coord : 0;
+
+  return $coords;
+}
+
+function getLastComment($viaje_tid) {
+  $table = 'comments_eje_view';
+  $query = db_select($table, 'c');
+  $query->addField('c', 'com_nid', 'com_nid');
+  $query->addField('c', 'comments', 'comments');
+  $query->addField('c', 'viaje_tid', 'viaje_tid');
+  $query->addField('c', 'viaje', 'viaje');
+  $query->addField('c', 'tax_id', 'tax_id');
+  $query->addField('c', 'viaje_tax', 'viaje_tax');
+
+  $query->condition('c.viaje_tid', $viaje_tid , '=');
+  $query->orderBy('com_nid', 'DESC');
+  $query->range(0, 1);
+
+  $exeResults = $query->execute();
+  $results = $exeResults->fetchAll();
+  
+  $comments = (isset($results[0]->comments)) ? $results[0]->comments : '';
+
+  return $comments;
+}
+/*
+ * Select Barco Name
+ */
+function getBarcoName($id, $field) {
+
+  $barco_name = db_select('node', 'barco_names');
+  $barco_name->addField('barco_names', 'title', 'barco_name');
+  $barco_name->condition('barco_names.type', 'barcos', '=');
+  $barco_name->orderBy('barco_name');
+  $exeResults = $barco_name->execute();
+  $results = $exeResults->fetchAll();
+
+  return $results[$id]->$field;
+}
+
+function statsViajes($id, $field) {
+  $table = 'stats_viajes_view1';
+  $query = db_select($table, 's');
+  $query->addField('s', 'barco_nid', 'barco_nid');
+  $query->addField('s', 'barco', 'barco');
+  $query->addField('s', 'Abordo', 'abordo');
+  $query->addField('s', 'Vacio', 'vacio');
+  $query->addField('s', 'dias_pesca', 'dias_pesca');
+  $query->addField('s', 'Promedio', 'tm_x_dia');
+  $exeResults = $query->execute();
+  $results = $exeResults->fetchAll();
+
+  return $results[$id]->$field;
+}
+
+function statsViajes2($id, $field) {
+  $table = 'stats_viajes_view2';
+  $query = db_select($table, 's');
+  $query->addField('s', 'barco_nid', 'barco_nid');
+  $query->addField('s', 'Barco', 'barco');
+  $query->addField('s', 'Lances', 'lances');
+  $query->addField('s', 'Total', 'total');
+  $query->addField('s', 'TxL', 'tons_x_lance');
+  $exeResults = $query->execute();
+  $results = $exeResults->fetchAll();
+
+  return $results[$id]->$field;
+
+}
+
+
+function capitalizeName($nom_tec, $pat_tec) {
+  $nombre_tec = ucfirst(strtolower($nom_tec));
+  $paterno_tec = ucfirst(strtolower($pat_tec));
+  //$materno_tec = ucfirst(strtolower($mat_tec));
+  $full_name = $nombre_tec . ' ' . $paterno_tec;
+
+  return $full_name;
+}
+
+function getDay($day) {
+
+  $barco = db_select('node', 'bnode2');
+
+  $barco->addField('bnode2', 'nid', 'bar_nid');
+  $barco->addField('bnode2', 'title', 'bar_name');
+
+  $barco_tid = db_select('field_data_field_barco_viaje', 'barco_tid');
+  $barco_tid->addField('barco_tid', 'entity_id', 'bar_eid');
+  $barco_tid->addField('barco_tid', 'field_barco_viaje_target_id', 'bar_tid');
+
+  $day_query = db_select('field_data_field_fecha_diario', 'fechas');
+  $day_query->leftJoin('field_data_field_total_capt_diario', 'capt',
+      'capt.entity_id = fechas.entity_id');
+
+  $day_query->leftJoin($barco_tid, 'barco_tid_join',
+      'barco_tid_join.bar_eid = fechas.entity_id');
+  $day_query->leftJoin($barco, 'barco_join',
+      'barco_join.bar_nid = barco_tid_join.bar_tid');
+
+  $day_query->leftJoin('field_data_field_buscar_viaje_diario', 'v',
+      'v.entity_id =fechas.entity_id');
+  $day_query->leftJoin('ing_tec_viajes_view', 'tec',
+      'tec.viaje_nid = v.field_buscar_viaje_diario_target_id');
+  $day_query->leftJoin('viajes_tax_view', 'v_view',
+      'v_view.viaje_nid = v.field_buscar_viaje_diario_target_id');
+
+  $day_query->addField('fechas', 'entity_id', 'eid_day');
+  $day_query->addField('fechas', 'field_fecha_diario_value', 'day');
+  $day_query->addField('capt', 'field_total_capt_diario_value', 'total_day');
+  $day_query->addField('barco_join', 'bar_name', 'bar_name');
+  $day_query->addField('tec', 'viaje_tax', 'viaje');
+  $day_query->addField('tec', 'nom_tec', 'nom_tec');
+  $day_query->addField('tec', 'paterno_tec', 'paterno_tec');
+  $day_query->addField('tec', 'materno_tec', 'materno_tec');
+  $day_query->addField('v_view', 'viaje_nid', 'viaje_nid');
+  $day_query->condition('fechas.field_fecha_diario_value', $day . '%', 'LIKE');
+  $day_query->orderBy('bar_name'); /* Shared Code */
+  $exeResults_day = $day_query->execute();
+  $results_day = $exeResults_day->fetchAll();
+
+  return $results_day;
+}
+
+function getNotaGeneral() {
+  $yesterday = date('Y-m-d', strtotime('1 days ago'));
+  
+  $table = 'nota_general_view';
+  $query = db_select($table, 'n');
+  
+  $query->addField('n', 'fecha', 'fecha');
+  $query->addField('n', 'comentario', 'comentario');
+  
+  $query->condition('n.fecha', $yesterday . '%', 'LIKE');
+  $exeResults = $query->execute();
+  $results = $exeResults->fetchAll();
+
+  $comentario = (isset($results[0]->comentario)) ? $results[0]->comentario : '';
+  
+  return $comentario;
+  
+}
+
+function createDayWeek($day_of_week) {
+  
+  $curr_week = date('W');
+  $curr_year = date('Y');
+
+  $week_number = isset($_GET["week"]) ? check_plain($_GET["week"]) : $curr_week;
+  $year = isset($_GET["year"]) ? check_plain($_GET["year"]) : $curr_year;
+  
+  $day = strtotime($year."W".str_pad($week_number,2,0,STR_PAD_LEFT).$day_of_week);
+  
+  //  $html .= '<p>' . "From " . date("l", $monday) . " " . date("j", $monday) .
+  //     " of " . date("F", $monday) . " of " . $year . " to " . date("l", $sunday)
+  //     . " " . date("j", $sunday) . " of " . date("F", $sunday) . " of " . $year . '</p>';
+  
+  return $day;
+}
+
+function getTecnico($id) {
+  $monday = date('Y-m-d', createDayWeek("1"));
+  $results_monday = getDay($monday);
+  $nom_tec = (isset($results_monday[$id]->nom_tec)) ? $results_monday[$id]->nom_tec : '';
+  $pat_tec = (isset($results_monday[$id]->paterno_tec)) ? $results_monday[$id]->paterno_tec : '';
+  $nombre_tec = capitalizeName($nom_tec, $pat_tec);
+  
+  return $nombre_tec;
+}
+
+function reporteDiarioFlota() {
+
+  $gran_total_monday = '';
+  $gran_total_tuesday = '';
+  $gran_total_wednesday = '';
+  $gran_total_thursday = '';
+  $gran_total_friday = '';
+  $gran_total_saturday = '';
+  $gran_total_sunday = '';
+
+  $monday = date('Y-m-d', createDayWeek("1"));
+  $tuesday = date('Y-m-d', createDayWeek("2"));
+  $wednesday = date('Y-m-d', createDayWeek("3"));
+  $thursday = date('Y-m-d', createDayWeek("4"));
+  $friday = date('Y-m-d', createDayWeek("5"));
+  $saturday = date('Y-m-d', createDayWeek("6"));
+  $sunday = date('Y-m-d', createDayWeek("7"));
+
+  /* Monday */
+  $results_monday = getDay($monday);
+  /* Tuesday */
+  $results_tuesday = getDay($tuesday);
+  /* Wednesday */
+  $results_wednesday = getDay($wednesday);
+  /* Thursday */
+  $results_thursday = getDay($thursday);
+  /* Friday */
+  $results_friday = getDay($friday);
+  /* Saturday */
+  $results_saturday = getDay($saturday);
+  /* Sunday */
+  $results_sunday = getDay($sunday);
+  /*
+   * Get last coordinates
+   */
+  $lat0 = (isset($results_monday[0]->viaje_nid)) ? getLastCoord($results_monday[0]->viaje_nid, 'lat') : '';
+  $lon0 = (isset($results_monday[0]->viaje_nid)) ? getLastCoord($results_monday[0]->viaje_nid, 'lon') : '';
+  $lat0 = turnDDtoDMS($lat0);
+  $lon0 = turnDDtoDMS($lon0);
+  $lat1 = (isset($results_monday[1]->viaje_nid)) ? getLastCoord($results_monday[1]->viaje_nid, 'lat') : '';
+  $lon1 = (isset($results_monday[1]->viaje_nid)) ? getLastCoord($results_monday[1]->viaje_nid, 'lon') : '';
+  $lat1 = turnDDtoDMS($lat1);
+  $lon1 = turnDDtoDMS($lon1);
+  $lat2 = (isset($results_monday[2]->viaje_nid)) ? getLastCoord($results_monday[2]->viaje_nid, 'lat') : '';
+  $lon2 = (isset($results_monday[2]->viaje_nid)) ? getLastCoord($results_monday[2]->viaje_nid, 'lon') : '';
+  $lat2 = turnDDtoDMS($lat2);
+  $lon2 = turnDDtoDMS($lon2);
+  $lat3 = (isset($results_monday[3]->viaje_nid)) ? getLastCoord($results_monday[3]->viaje_nid, 'lat') : '';
+  $lon3 = (isset($results_monday[3]->viaje_nid)) ? getLastCoord($results_monday[3]->viaje_nid, 'lon') : '';
+  $lat3 = turnDDtoDMS($lat3);
+  $lon3 = turnDDtoDMS($lon3);
+  $lat4 = (isset($results_monday[4]->viaje_nid)) ? getLastCoord($results_monday[4]->viaje_nid, 'lat') : '';
+  $lon4 = (isset($results_monday[4]->viaje_nid)) ? getLastCoord($results_monday[4]->viaje_nid, 'lon') : '';
+  $lat4 = turnDDtoDMS($lat4);
+  $lon4 = turnDDtoDMS($lon4);
+  $lat5 = (isset($results_monday[5]->viaje_nid)) ? getLastCoord($results_monday[5]->viaje_nid, 'lat') : '';
+  $lon5 = (isset($results_monday[5]->viaje_nid)) ? getLastCoord($results_monday[5]->viaje_nid, 'lon') : '';
+  $lat5 = turnDDtoDMS($lat5);
+  $lon5 = turnDDtoDMS($lon5);
+  $lat6 = (isset($results_monday[6]->viaje_nid)) ? getLastCoord($results_monday[6]->viaje_nid, 'lat') : '';
+  $lon6 = (isset($results_monday[6]->viaje_nid)) ? getLastCoord($results_monday[6]->viaje_nid, 'lon') : '';
+  $lat6 = turnDDtoDMS($lat6);
+  $lon6 = turnDDtoDMS($lon6);
+  $lat7 = (isset($results_monday[7]->viaje_nid)) ? getLastCoord($results_monday[7]->viaje_nid, 'lat') : '';
+  $lon7 = (isset($results_monday[7]->viaje_nid)) ? getLastCoord($results_monday[7]->viaje_nid, 'lon') : '';
+  $lat7 = turnDDtoDMS($lat7);
+  $lon7 = turnDDtoDMS($lon7);
+  $lat8 = (isset($results_monday[8]->viaje_nid)) ? getLastCoord($results_monday[8]->viaje_nid, 'lat') : '';
+  $lon8 = (isset($results_monday[8]->viaje_nid)) ? getLastCoord($results_monday[8]->viaje_nid, 'lon') : '';
+  $lat8 = turnDDtoDMS($lat8);
+  $lon8 = turnDDtoDMS($lon8);
+  $lat9 = (isset($results_monday[9]->viaje_nid)) ? getLastCoord($results_monday[9]->viaje_nid, 'lat') : '';
+  $lon9 = (isset($results_monday[9]->viaje_nid)) ? getLastCoord($results_monday[9]->viaje_nid, 'lon') : '';
+  $lat9 = turnDDtoDMS($lat9);
+  $lon9 = turnDDtoDMS($lon9);
+  $lat10 = (isset($results_monday[10]->viaje_nid)) ? getLastCoord($results_monday[10]->viaje_nid, 'lat') : '';
+  $lon10 = (isset($results_monday[10]->viaje_nid)) ? getLastCoord($results_monday[10]->viaje_nid, 'lon') : '';
+  $lat10 = turnDDtoDMS($lat10);
+  $lon10 = turnDDtoDMS($lon10);
+  $lat11 = (isset($results_monday[11]->viaje_nid)) ? getLastCoord($results_monday[11]->viaje_nid, 'lat') : '';
+  $lon11 = (isset($results_monday[11]->viaje_nid)) ? getLastCoord($results_monday[11]->viaje_nid, 'lon') : '';
+  $lat11 = turnDDtoDMS($lat11);
+  $lon11 = turnDDtoDMS($lon11);
+  $lat12 = (isset($results_monday[12]->viaje_nid)) ? getLastCoord($results_monday[12]->viaje_nid, 'lat') : '';
+  $lon12 = (isset($results_monday[12]->viaje_nid)) ? getLastCoord($results_monday[12]->viaje_nid, 'lon') : '';
+  $lat12 = turnDDtoDMS($lat12);
+  $lon12 = turnDDtoDMS($lon12);
+  $lat13 = (isset($results_monday[13]->viaje_nid)) ? getLastCoord($results_monday[13]->viaje_nid, 'lat') : '';
+  $lon13 = (isset($results_monday[13]->viaje_nid)) ? getLastCoord($results_monday[13]->viaje_nid, 'lon') : '';
+  $lat13 = turnDDtoDMS($lat13);
+  $lon13 = turnDDtoDMS($lon13);
+  $lat14 = (isset($results_monday[14]->viaje_nid)) ? getLastCoord($results_monday[14]->viaje_nid, 'lat') : '';
+  $lon14 = (isset($results_monday[14]->viaje_nid)) ? getLastCoord($results_monday[14]->viaje_nid, 'lon') : '';
+  $lat14 = turnDDtoDMS($lat14);
+  $lon14 = turnDDtoDMS($lon14);
+  $lat15 = (isset($results_monday[15]->viaje_nid)) ? getLastCoord($results_monday[15]->viaje_nid, 'lat') : '';
+  $lon15 = (isset($results_monday[15]->viaje_nid)) ? getLastCoord($results_monday[15]->viaje_nid, 'lon') : '';
+  $lat15 = turnDDtoDMS($lat15);
+  $lon15 = turnDDtoDMS($lon15);
+  $lat16 = (isset($results_monday[16]->viaje_nid)) ? getLastCoord($results_monday[16]->viaje_nid, 'lat') : '';
+  $lon16 = (isset($results_monday[16]->viaje_nid)) ? getLastCoord($results_monday[16]->viaje_nid, 'lon') : '';
+  $lat16 = turnDDtoDMS($lat16);
+  $lon16 = turnDDtoDMS($lon16);
+  $lat17 = (isset($results_monday[17]->viaje_nid)) ? getLastCoord($results_monday[17]->viaje_nid, 'lat') : '';
+  $lon17 = (isset($results_monday[17]->viaje_nid)) ? getLastCoord($results_monday[17]->viaje_nid, 'lon') : '';
+  $lat17 = turnDDtoDMS($lat17);
+  $lon17 = turnDDtoDMS($lon17);
+  $lat18 = (isset($results_monday[18]->viaje_nid)) ? getLastCoord($results_monday[18]->viaje_nid, 'lat') : '';
+  $lon18 = (isset($results_monday[18]->viaje_nid)) ? getLastCoord($results_monday[18]->viaje_nid, 'lon') : '';
+  $lat18 = turnDDtoDMS($lat18);
+  $lon18 = turnDDtoDMS($lon18);
+  $lat19 = (isset($results_monday[19]->viaje_nid)) ? getLastCoord($results_monday[19]->viaje_nid, 'lat') : '';
+  $lon19 = (isset($results_monday[19]->viaje_nid)) ? getLastCoord($results_monday[19]->viaje_nid, 'lon') : '';
+  $lat19 = turnDDtoDMS($lat19);
+  $lon19 = turnDDtoDMS($lon19);
+
+  $html = '';
+  //$html .= '<p>' . $last_coords0 . '</p>';
+  $html .= '<div class="table-responsive">';
+  $html .= '<table class="table table-hover table-fixed">';
+  $html .= '<thead>';
+  $html .= '<tr>';
+  $html .= '<th>' . 'BARCO' . '</th>';
+  $html .= '<th>' . 'VIAJE' . '</th>';
+  $html .= '<th>' . 'VIAJE<br>ACTUAL' . '</th>';
+  $html .= '<th>' . 'LUN' . '</th>';
+  $html .= '<th>' . 'MAR' . '</th>';
+  $html .= '<th>' . 'MIER' . '</th>';
+  $html .= '<th>' . 'JUE' . '</th>';
+  $html .= '<th>' . 'VIE' . '</th>';
+  $html .= '<th>' . 'SAB' . '</th>';
+  $html .= '<th>' . 'DOM' . '</th>';
+  $html .= '<th>' . 'TANQUES<br>VACÍOS' . '</th>';
+  $html .= '<th>' . 'ABORDO' . '</th>';
+  $html .= '<th>' . 'TM<br>X<br>DÍA' . '</th>';
+  $html .= '<th>' . 'LANCES' . '</th>';
+  $html .= '<th>' . 'T x L' . '</th>';
+  $html .= '<th>' . 'LAT' . '</th>';
+  $html .= '<th>' . 'LONG' . '</th>';
+  $html .= '</tr>';
+  $html .= '</thead>';
+  foreach ($results_monday as $result_monday) {
+    $total_monday = $result_monday->total_day;
+    $gran_total_monday += $total_monday;
+  }
+  foreach ($results_tuesday as $result_tuesday) {
+    $gran_total_tuesday += $result_tuesday->total_day;
+  }
+  foreach ($results_wednesday as $result_wednesday) {
+    $gran_total_wednesday += $result_wednesday->total_day;
+  }
+  foreach ($results_thursday as $result_thursday) {
+    $gran_total_thursday += $result_thursday->total_day;
+  }
+  foreach ($results_friday as $result_friday) {
+    $gran_total_friday += $result_friday->total_day;
+  }
+  foreach ($results_saturday as $result_saturday) {
+    $gran_total_saturday += $result_saturday->total_day;
+  }
+  foreach ($results_sunday as $result_sunday) {
+    $gran_total_sunday += $result_sunday->total_day;
+  }
+
+  $html .= '<tbody>';
+  $html .= '<tr>';
+  //$html .= '<td>' . '</td>';
+  /* Azteca 1 */
+  $html .= '<td>' . getBarcoName(0, 'barco_name') . '<br><small>' . getTecnico(0) . ' '
+      . '</small>' . '</td>';
+  $html .= '<td>' . $results_monday[0]->viaje . '</td>';
+  $html .= '<td>' . statsViajes(0, 'dias_pesca') . '</td>';
+  $html .= '<td>' . $results_monday[0]->total_day . '</td>';
+  $html .= '<td>' . $results_tuesday[0]->total_day . '</td>';
+  $html .= '<td>' . $results_wednesday[0]->total_day . '</td>';
+  $html .= '<td>' . $results_thursday[0]->total_day . '</td>';
+  $html .= '<td>' . $results_friday[0]->total_day . '</td>';
+  $html .= '<td>' . $results_saturday[0]->total_day . '</td>';
+  $html .= '<td>' . $results_sunday[0]->total_day . '</td>';
+  $html .= '<td>' . statsViajes(0, 'vacio') . '</td>';
+  $html .= '<td>' . statsViajes(0, 'abordo') . '</td>';
+  $html .= '<td>' . statsViajes(0, 'tm_x_dia') . '</td>';
+  $html .= '<td>' . statsViajes2(0, 'lances') . '</td>';
+  $html .= '<td>' . statsViajes2(0, 'tons_x_lance') . '</td>';
+  $html .= '<td>' . $lat0 . '</td>';
+  $html .= '<td>' . $lon0 . '</td>';
+  $html .= '</tr>';
+  $html .= '<tr>';
+  $html .= '<td>' . getBarcoName(2, 'barco_name') . '<br><small>' . getTecnico(2) . ' '
+      . '</small>' . '</td>';
+  $html .= '<td>' . $results_monday[2]->viaje . '</td>';
+  $html .= '<td>' . statsViajes(2, 'dias_pesca') . '</td>';
+  $html .= '<td>' . $results_monday[2]->total_day . '</td>';
+  $html .= '<td>' . $results_tuesday[2]->total_day . '</td>';
+  $html .= '<td>' . $results_wednesday[2]->total_day . '</td>';
+  $html .= '<td>' . $results_thursday[2]->total_day . '</td>';
+  $html .= '<td>' . $results_friday[2]->total_day . '</td>';
+  $html .= '<td>' . $results_saturday[2]->total_day . '</td>';
+  $html .= '<td>' . $results_sunday[2]->total_day . '</td>';
+  $html .= '<td>' . statsViajes(2, 'vacio') . '</td>';
+  $html .= '<td>' . statsViajes(2, 'abordo') . '</td>';
+  $html .= '<td>' . statsViajes(2, 'tm_x_dia') . '</td>';
+  $html .= '<td>' . statsViajes2(2, 'lances') . '</td>';
+  $html .= '<td>' . statsViajes2(2, 'tons_x_lance') . '</td>';
+  $html .= '<td>' . $lat2 . '</td>';
+  $html .= '<td>' . $lon2 . '</td>';
+  $html .= '</tr>';
+  $html .= '<tr>';
+  $html .= '<td>' . getBarcoName(3, 'barco_name') .
+      '<br><small>' . getTecnico(3) . '</small>' . '</td>';
+  $html .= '<td>' . $results_monday[3]->viaje . '</td>';
+  $html .= '<td>' . statsViajes(3, 'dias_pesca') . '</td>';
+  $html .= '<td>' . $results_monday[3]->total_day . '</td>';
+  $html .= '<td>' . $results_tuesday[3]->total_day . '</td>';
+  $html .= '<td>' . $results_wednesday[3]->total_day . '</td>';
+  $html .= '<td>' . $results_thursday[3]->total_day . '</td>';
+  $html .= '<td>' . $results_friday[3]->total_day . '</td>';
+  $html .= '<td>' . $results_saturday[3]->total_day . '</td>';
+  $html .= '<td>' . $results_sunday[3]->total_day . '</td>';
+  $html .= '<td>' . statsViajes(3, 'vacio') . '</td>';
+  $html .= '<td>' . statsViajes(3, 'abordo') . '</td>';
+  $html .= '<td>' . statsViajes(3, 'tm_x_dia') . '</td>';
+  $html .= '<td>' . statsViajes2(3, 'lances') . '</td>';
+  $html .= '<td>' . statsViajes2(3, 'tons_x_lance') . '</td>';
+  $html .= '<td>' . $lat3 . '</td>';
+  $html .= '<td>' . $lon3 . '</td>';
+  $html .= '</tr>';
+  $html .= '<tr>';
+  $html .= '<td>' . getBarcoName(4, 'barco_name') .
+      '<br><small>' . getTecnico(4) . '</small>' . '</td>';
+  $html .= '<td>' . $results_monday[4]->viaje . '</td>';
+  $html .= '<td>' . statsViajes(4, 'dias_pesca') . '</td>';
+  $html .= '<td>' . $results_monday[4]->total_day . '</td>';
+  $html .= '<td>' . $results_tuesday[4]->total_day . '</td>';
+  $html .= '<td>' . $results_wednesday[4]->total_day . '</td>';
+  $html .= '<td>' . $results_thursday[4]->total_day . '</td>';
+  $html .= '<td>' . $results_friday[4]->total_day . '</td>';
+  $html .= '<td>' . $results_saturday[4]->total_day . '</td>';
+  $html .= '<td>' . $results_sunday[4]->total_day . '</td>';
+  $html .= '<td>' . statsViajes(4, 'vacio') . '</td>';
+  $html .= '<td>' . statsViajes(4, 'abordo') . '</td>';
+  $html .= '<td>' . statsViajes(4, 'tm_x_dia') . '</td>';
+  $html .= '<td>' . statsViajes2(4, 'lances') . '</td>';
+  $html .= '<td>' . statsViajes2(4, 'tons_x_lance') . '</td>';
+  $html .= '<td>' . $lat4 . '</td>';
+  $html .= '<td>' . $lon4 . '</td>';
+  $html .= '</tr>';
+  $html .= '<tr>';
+  $html .= '<td>' . getBarcoName(5, 'barco_name') .
+      '<br><small>' . getTecnico(5) . '</small>' . '</td>';
+  $html .= '<td>' . $results_monday[5]->viaje . '</td>';
+  $html .= '<td>' . statsViajes(5, 'dias_pesca') . '</td>';
+  $html .= '<td>' . $results_monday[5]->total_day . '</td>';
+  $html .= '<td>' . $results_tuesday[5]->total_day . '</td>';
+  $html .= '<td>' . $results_wednesday[5]->total_day . '</td>';
+  $html .= '<td>' . $results_thursday[5]->total_day . '</td>';
+  $html .= '<td>' . $results_friday[5]->total_day . '</td>';
+  $html .= '<td>' . $results_saturday[5]->total_day . '</td>';
+  $html .= '<td>' . $results_sunday[5]->total_day . '</td>';
+  $html .= '<td>' . statsViajes(5, 'vacio') . '</td>';
+  $html .= '<td>' . statsViajes(5, 'abordo') . '</td>';
+  $html .= '<td>' . statsViajes(5, 'tm_x_dia') . '</td>';
+  $html .= '<td>' . statsViajes2(5, 'lances') . '</td>';
+  $html .= '<td>' . statsViajes2(5, 'tons_x_lance') . '</td>';
+  $html .= '<td>' . $lat5 . '</td>';
+  $html .= '<td>' . $lon5 . '</td>';
+  $html .= '</tr>';
+  $html .= '<tr>';
+  $html .= '<td>' . getBarcoName(6, 'barco_name') .
+      '<br><small>' . getTecnico(6) . '</small>' . '</td>';
+  $html .= '<td>' . $results_monday[6]->viaje . '</td>';
+  $html .= '<td>' . statsViajes(6, 'dias_pesca') . '</td>';
+  $html .= '<td>' . $results_monday[6]->total_day . '</td>';
+  $html .= '<td>' . $results_tuesday[6]->total_day . '</td>';
+  $html .= '<td>' . $results_wednesday[6]->total_day . '</td>';
+  $html .= '<td>' . $results_thursday[6]->total_day . '</td>';
+  $html .= '<td>' . $results_friday[6]->total_day . '</td>';
+  $html .= '<td>' . $results_saturday[6]->total_day . '</td>';
+  $html .= '<td>' . $results_sunday[6]->total_day . '</td>';
+  $html .= '<td>' . statsViajes(6, 'vacio') . '</td>';
+  $html .= '<td>' . statsViajes(6, 'abordo') . '</td>';
+  $html .= '<td>' . statsViajes(6, 'tm_x_dia') . '</td>';
+  $html .= '<td>' . statsViajes2(6, 'lances') . '</td>';
+  $html .= '<td>' . statsViajes2(6, 'tons_x_lance') . '</td>';
+  $html .= '<td>' . $lat6 . '</td>';
+  $html .= '<td>' . $lon6 . '</td>';
+  $html .= '</tr>';
+  $html .= '<tr>';
+  $html .= '<td>' . getBarcoName(7, 'barco_name') .
+      '<br><small>' . getTecnico(7) . '</small>' . '</td>';
+  $html .= '<td>' . $results_monday[7]->viaje . '</td>';
+  $html .= '<td>' . statsViajes(7, 'dias_pesca') . '</td>';
+  $html .= '<td>' . $results_monday[7]->total_day . '</td>';
+  $html .= '<td>' . $results_tuesday[7]->total_day . '</td>';
+  $html .= '<td>' . $results_wednesday[7]->total_day . '</td>';
+  $html .= '<td>' . $results_thursday[7]->total_day . '</td>';
+  $html .= '<td>' . $results_friday[7]->total_day . '</td>';
+  $html .= '<td>' . $results_saturday[7]->total_day . '</td>';
+  $html .= '<td>' . $results_sunday[7]->total_day . '</td>';
+  $html .= '<td>' . statsViajes(7, 'vacio') . '</td>';
+  $html .= '<td>' . statsViajes(7, 'abordo') . '</td>';
+  $html .= '<td>' . statsViajes(7, 'tm_x_dia') . '</td>';
+  $html .= '<td>' . statsViajes2(7, 'lances') . '</td>';
+  $html .= '<td>' . statsViajes2(7, 'tons_x_lance') . '</td>';
+  $html .= '<td>' . $lat7 . '</td>';
+  $html .= '<td>' . $lon7 . '</td>';
+  $html .= '</tr>';
+  $html .= '<tr>';
+  $html .= '<td>' . getBarcoName(8, 'barco_name') .
+      '<br><small>' . getTecnico(8) . '</small>' . '</td>';
+  $html .= '<td>' . $results_monday[8]->viaje . '</td>';
+  $html .= '<td>' . statsViajes(8, 'dias_pesca') . '</td>';
+  $html .= '<td>' . $results_monday[8]->total_day . '</td>';
+  $html .= '<td>' . $results_tuesday[8]->total_day . '</td>';
+  $html .= '<td>' . $results_wednesday[8]->total_day . '</td>';
+  $html .= '<td>' . $results_thursday[8]->total_day . '</td>';
+  $html .= '<td>' . $results_friday[8]->total_day . '</td>';
+  $html .= '<td>' . $results_saturday[8]->total_day . '</td>';
+  $html .= '<td>' . $results_sunday[8]->total_day . '</td>';
+  $html .= '<td>' . statsViajes(8, 'vacio') . '</td>';
+  $html .= '<td>' . statsViajes(8, 'abordo') . '</td>';
+  $html .= '<td>' . statsViajes(8, 'tm_x_dia') . '</td>';
+  $html .= '<td>' . statsViajes2(8, 'lances') . '</td>';
+  $html .= '<td>' . statsViajes2(8, 'tons_x_lance') . '</td>';
+  $html .= '<td>' . $lat8 . '</td>';
+  $html .= '<td>' . $lon8 . '</td>';
+  $html .= '</tr>';
+  $html .= '<tr>';
+  $html .= '<td>' . getBarcoName(9, 'barco_name') .
+      '<br><small>' . getTecnico(9) . '</small>' . '</td>';
+  $html .= '<td>' . $results_monday[9]->viaje . '</td>';
+  $html .= '<td>' . statsViajes(9, 'dias_pesca') . '</td>';
+  $html .= '<td>' . $results_monday[9]->total_day . '</td>';
+  $html .= '<td>' . $results_tuesday[9]->total_day . '</td>';
+  $html .= '<td>' . $results_wednesday[9]->total_day . '</td>';
+  $html .= '<td>' . $results_thursday[9]->total_day . '</td>';
+  $html .= '<td>' . $results_friday[9]->total_day . '</td>';
+  $html .= '<td>' . $results_saturday[9]->total_day . '</td>';
+  $html .= '<td>' . $results_sunday[9]->total_day . '</td>';
+  $html .= '<td>' . statsViajes(9, 'vacio') . '</td>';
+  $html .= '<td>' . statsViajes(9, 'abordo') . '</td>';
+  $html .= '<td>' . statsViajes(9, 'tm_x_dia') . '</td>';
+  $html .= '<td>' . statsViajes2(9, 'lances') . '</td>';
+  $html .= '<td>' . statsViajes2(9, 'tons_x_lance') . '</td>';
+  $html .= '<td>' . $lat9 . '</td>';
+  $html .= '<td>' . $lon9 . '</td>';
+  $html .= '</tr>';
+  /* Azteca 10 */
+  $html .= '<td>' . getBarcoName(1, 'barco_name') . '<br><small>' .
+      getTecnico(1) . '</small>' . '</td>';
+  $html .= '<td>' . $results_monday[1]->viaje . '</td>';
+  $html .= '<td>' . statsViajes(1, 'dias_pesca') . '</td>';
+  $html .= '<td>' . $results_monday[1]->total_day . '</td>';
+  $html .= '<td>' . $results_tuesday[1]->total_day . '</td>';
+  $html .= '<td>' . $results_wednesday[1]->total_day . '</td>';
+  $html .= '<td>' . $results_thursday[1]->total_day . '</td>';
+  $html .= '<td>' . $results_friday[1]->total_day . '</td>';
+  $html .= '<td>' . $results_saturday[1]->total_day . '</td>';
+  $html .= '<td>' . $results_sunday[1]->total_day . '</td>';
+  $html .= '<td>' . statsViajes(1, 'vacio') . '</td>';
+  $html .= '<td>' . statsViajes(1, 'abordo') . '</td>';
+  $html .= '<td>' . statsViajes(1, 'tm_x_dia') . '</td>';
+  $html .= '<td>' . statsViajes2(1, 'lances') . '</td>';
+  $html .= '<td>' . statsViajes2(1, 'tons_x_lance') . '</td>';
+  $html .= '<td>' . $lat1 . '</td>';
+  $html .= '<td>' . $lon1 . '</td>';
+  $html .= '</tr>';
+  /* Azteca 10*/
+  /* Mazatun */
+  $html .= '<tr>';
+  $html .= '<td>' . getBarcoName(15, 'barco_name') .
+      '<br><small>' . getTecnico(15) . '</small>' . '</td>';
+  $html .= '<td>' . $results_monday[15]->viaje . '</td>';
+  $html .= '<td>' . statsViajes(15, 'dias_pesca') . '</td>';
+  $html .= '<td>' . $results_monday[15]->total_day . '</td>';
+  $html .= '<td>' . $results_tuesday[15]->total_day . '</td>';
+  $html .= '<td>' . $results_wednesday[15]->total_day . '</td>';
+  $html .= '<td>' . $results_thursday[15]->total_day . '</td>';
+  $html .= '<td>' . $results_friday[15]->total_day . '</td>';
+  $html .= '<td>' . $results_saturday[15]->total_day . '</td>';
+  $html .= '<td>' . $results_sunday[15]->total_day . '</td>';
+  $html .= '<td>' . statsViajes(15, 'vacio') . '</td>';
+  $html .= '<td>' . statsViajes(15, 'abordo') . '</td>';
+  $html .= '<td>' . statsViajes(15, 'tm_x_dia') . '</td>';
+  $html .= '<td>' . statsViajes2(15, 'lances') . '</td>';
+  $html .= '<td>' . statsViajes2(15, 'tons_x_lance') . '</td>';
+  $html .= '<td>' . $lat15 . '</td>';
+  $html .= '<td>' . $lon15 . '</td>';
+  $html .= '</tr>';
+  /* Mazatun */
+  /* Clipperton */
+  $html .= '<tr>';
+  $html .= '<td>' . getBarcoName(11, 'barco_name') .
+      '<br><small>' . getTecnico(15) . '</small>' . '</td>';
+  $html .= '<td>' . $results_monday[11]->viaje . '</td>';
+  $html .= '<td>' . statsViajes(11, 'dias_pesca') . '</td>';
+  $html .= '<td>' . $results_monday[11]->total_day . '</td>';
+  $html .= '<td>' . $results_tuesday[11]->total_day . '</td>';
+  $html .= '<td>' . $results_wednesday[11]->total_day . '</td>';
+  $html .= '<td>' . $results_thursday[11]->total_day . '</td>';
+  $html .= '<td>' . $results_friday[11]->total_day . '</td>';
+  $html .= '<td>' . $results_saturday[11]->total_day . '</td>';
+  $html .= '<td>' . $results_sunday[11]->total_day . '</td>';
+  $html .= '<td>' . statsViajes(11, 'vacio') . '</td>';
+  $html .= '<td>' . statsViajes(11, 'abordo') . '</td>';
+  $html .= '<td>' . statsViajes(11, 'tm_x_dia') . '</td>';
+  $html .= '<td>' . statsViajes2(11, 'lances') . '</td>';
+  $html .= '<td>' . statsViajes2(11, 'tons_x_lance') . '</td>';
+  $html .= '<td>' . $lat11 . '</td>';
+  $html .= '<td>' . $lon11 . '</td>';
+  $html .= '</tr>';
+  /* Clipperton */
+  /* El Dorado */
+  $html .= '<tr>';
+  $html .= '<td>' . getBarcoName(12, 'barco_name') .
+      '<br><small>' . getTecnico(12) . '</small>' . '</td>';
+  $html .= '<td>' . $results_monday[12]->viaje . '</td>';
+  $html .= '<td>' . statsViajes(12, 'dias_pesca') . '</td>';
+  $html .= '<td>' . $results_monday[12]->total_day . '</td>';
+  $html .= '<td>' . $results_tuesday[12]->total_day . '</td>';
+  $html .= '<td>' . $results_wednesday[12]->total_day . '</td>';
+  $html .= '<td>' . $results_thursday[12]->total_day . '</td>';
+  $html .= '<td>' . $results_friday[12]->total_day . '</td>';
+  $html .= '<td>' . $results_saturday[12]->total_day . '</td>';
+  $html .= '<td>' . $results_sunday[12]->total_day . '</td>';
+  $html .= '<td>' . statsViajes(12, 'vacio') . '</td>';
+  $html .= '<td>' . statsViajes(12, 'abordo') . '</td>';
+  $html .= '<td>' . statsViajes(12, 'tm_x_dia') . '</td>';
+  $html .= '<td>' . statsViajes2(12, 'lances') . '</td>';
+  $html .= '<td>' . statsViajes2(12, 'tons_x_lance') . '</td>';
+  $html .= '<td>' . $lat12 . '</td>';
+  $html .= '<td>' . $lon12 . '</td>';
+  $html .= '</tr>';
+  /* El Dorado */
+  /* Franz */
+  $html .= '<tr>';
+  $html .= '<td>' . getBarcoName(13, 'barco_name') .
+      '<br><small>' . getTecnico(13) . '</small>' . '</td>';
+  $html .= '<td>' . $results_monday[13]->viaje . '</td>';
+  $html .= '<td>' . statsViajes(13, 'dias_pesca') . '</td>';
+  $html .= '<td>' . $results_monday[13]->total_day . '</td>';
+  $html .= '<td>' . $results_tuesday[13]->total_day . '</td>';
+  $html .= '<td>' . $results_wednesday[13]->total_day . '</td>';
+  $html .= '<td>' . $results_thursday[13]->total_day . '</td>';
+  $html .= '<td>' . $results_friday[13]->total_day . '</td>';
+  $html .= '<td>' . $results_saturday[13]->total_day . '</td>';
+  $html .= '<td>' . $results_sunday[13]->total_day . '</td>';
+  $html .= '<td>' . statsViajes(13, 'vacio') . '</td>';
+  $html .= '<td>' . statsViajes(13, 'abordo') . '</td>';
+  $html .= '<td>' . statsViajes(13, 'tm_x_dia') . '</td>';
+  $html .= '<td>' . statsViajes2(13, 'lances') . '</td>';
+  $html .= '<td>' . statsViajes2(13, 'tons_x_lance') . '</td>';
+  $html .= '<td>' . $lat13 . '</td>';
+  $html .= '<td>' . $lon13 . '</td>';
+  $html .= '</tr>';
+  /* Franz */
+  /* Hanna */
+  $html .= '<tr>';
+  $html .= '<td>' . getBarcoName(14, 'barco_name') .
+      '<br><small>' . getTecnico(14) . '</small>' . '</td>';
+  $html .= '<td>' . $results_monday[14]->viaje . '</td>';
+  $html .= '<td>' . statsViajes(14, 'dias_pesca') . '</td>';
+  $html .= '<td>' . $results_monday[14]->total_day . '</td>';
+  $html .= '<td>' . $results_tuesday[14]->total_day . '</td>';
+  $html .= '<td>' . $results_wednesday[14]->total_day . '</td>';
+  $html .= '<td>' . $results_thursday[14]->total_day . '</td>';
+  $html .= '<td>' . $results_friday[14]->total_day . '</td>';
+  $html .= '<td>' . $results_saturday[14]->total_day . '</td>';
+  $html .= '<td>' . $results_sunday[14]->total_day . '</td>';
+  $html .= '<td>' . statsViajes(14, 'vacio') . '</td>';
+  $html .= '<td>' . statsViajes(14, 'abordo') . '</td>';
+  $html .= '<td>' . statsViajes(14, 'tm_x_dia') . '</td>';
+  $html .= '<td>' . statsViajes2(14, 'lances') . '</td>';
+  $html .= '<td>' . statsViajes2(14, 'tons_x_lance') . '</td>';
+  $html .= '<td>' . $lat14 . '</td>';
+  $html .= '<td>' . $lon14 . '</td>';
+  $html .= '</tr>';
+  /* Hanna */
+  /* Tamara */
+  $html .= '<tr>';
+  $html .= '<td>' . getBarcoName(18, 'barco_name') .
+      '<br><small>' . getTecnico(18) . '</small>' . '</td>';
+  $html .= '<td>' . $results_monday[18]->viaje . '</td>';
+  $html .= '<td>' . statsViajes(18, 'dias_pesca') . '</td>';
+  $html .= '<td>' . $results_monday[18]->total_day . '</td>';
+  $html .= '<td>' . $results_tuesday[18]->total_day . '</td>';
+  $html .= '<td>' . $results_wednesday[18]->total_day . '</td>';
+  $html .= '<td>' . $results_thursday[18]->total_day . '</td>';
+  $html .= '<td>' . $results_friday[18]->total_day . '</td>';
+  $html .= '<td>' . $results_saturday[18]->total_day . '</td>';
+  $html .= '<td>' . $results_sunday[18]->total_day . '</td>';
+  $html .= '<td>' . statsViajes(18, 'vacio') . '</td>';
+  $html .= '<td>' . statsViajes(18, 'abordo') . '</td>';
+  $html .= '<td>' . statsViajes(18, 'tm_x_dia') . '</td>';
+  $html .= '<td>' . statsViajes2(18, 'lances') . '</td>';
+  $html .= '<td>' . statsViajes2(18, 'tons_x_lance') . '</td>';
+  $html .= '<td>' . $lat18 . '</td>';
+  $html .= '<td>' . $lon18 . '</td>';
+  $html .= '</tr>';
+  /* Tamara */
+  /* Camila */
+  $html .= '<tr>';
+  $html .= '<td>' . getBarcoName(10, 'barco_name') .
+      '<br><small>' . getTecnico(10) . '</small>' . '</td>';
+  $html .= '<td>' . $results_monday[10]->viaje . '</td>';
+  $html .= '<td>' . statsViajes(10, 'dias_pesca') . '</td>';
+  $html .= '<td>' . $results_monday[10]->total_day . '</td>';
+  $html .= '<td>' . $results_tuesday[10]->total_day . '</td>';
+  $html .= '<td>' . $results_wednesday[10]->total_day . '</td>';
+  $html .= '<td>' . $results_thursday[10]->total_day . '</td>';
+  $html .= '<td>' . $results_friday[10]->total_day . '</td>';
+  $html .= '<td>' . $results_saturday[10]->total_day . '</td>';
+  $html .= '<td>' . $results_sunday[10]->total_day . '</td>';
+  $html .= '<td>' . statsViajes(10, 'vacio') . '</td>';
+  $html .= '<td>' . statsViajes(10, 'abordo') . '</td>';
+  $html .= '<td>' . statsViajes(10, 'tm_x_dia') . '</td>';
+  $html .= '<td>' . statsViajes2(10, 'lances') . '</td>';
+  $html .= '<td>' . statsViajes2(10, 'tons_x_lance') . '</td>';
+  $html .= '<td>' . $lat10 . '</td>';
+  $html .= '<td>' . $lon10 . '</td>';
+  $html .= '</tr>';
+  /* Camila */
+  /* Paco C */
+  $html .= '<tr>';
+  $html .= '<td>' . getBarcoName(17, 'barco_name') .
+      '<br><small>' . getTecnico(17) . '</small>' . '</td>';
+  $html .= '<td>' . $results_monday[17]->viaje . '</td>';
+  $html .= '<td>' . statsViajes(17, 'dias_pesca') . '</td>';
+  $html .= '<td>' . $results_monday[17]->total_day . '</td>';
+  $html .= '<td>' . $results_tuesday[17]->total_day . '</td>';
+  $html .= '<td>' . $results_wednesday[17]->total_day . '</td>';
+  $html .= '<td>' . $results_thursday[17]->total_day . '</td>';
+  $html .= '<td>' . $results_friday[17]->total_day . '</td>';
+  $html .= '<td>' . $results_saturday[17]->total_day . '</td>';
+  $html .= '<td>' . $results_sunday[17]->total_day . '</td>';
+  $html .= '<td>' . statsViajes(17, 'vacio') . '</td>';
+  $html .= '<td>' . statsViajes(17, 'abordo') . '</td>';
+  $html .= '<td>' . statsViajes(17, 'tm_x_dia') . '</td>';
+  $html .= '<td>' . statsViajes2(17, 'lances') . '</td>';
+  $html .= '<td>' . statsViajes2(17, 'tons_x_lance') . '</td>';
+  $html .= '<td>' . $lat17 . '</td>';
+  $html .= '<td>' . $lon17 . '</td>';
+  $html .= '</tr>';
+  /* Paco C */
+  /* Titis */
+  $html .= '<tr>';
+  $html .= '<td>' . getBarcoName(19, 'barco_name') .
+      '<br><small>' . getTecnico(19) . '</small>' . '</td>';
+  $html .= '<td>' . $results_monday[19]->viaje . '</td>';
+  $html .= '<td>' . statsViajes(19, 'dias_pesca') . '</td>';
+  $html .= '<td>' . $results_monday[19]->total_day . '</td>';
+  $html .= '<td>' . $results_tuesday[19]->total_day . '</td>';
+  $html .= '<td>' . $results_wednesday[19]->total_day . '</td>';
+  $html .= '<td>' . $results_thursday[19]->total_day . '</td>';
+  $html .= '<td>' . $results_friday[19]->total_day . '</td>';
+  $html .= '<td>' . $results_saturday[19]->total_day . '</td>';
+  $html .= '<td>' . $results_sunday[19]->total_day . '</td>';
+  $html .= '<td>' . statsViajes(19, 'vacio') . '</td>';
+  $html .= '<td>' . statsViajes(19, 'abordo') . '</td>';
+  $html .= '<td>' . statsViajes(19, 'tm_x_dia') . '</td>';
+  $html .= '<td>' . statsViajes2(19, 'lances') . '</td>';
+  $html .= '<td>' . statsViajes2(19, 'tons_x_lance') . '</td>';
+  $html .= '<td>' . $lat19 . '</td>';
+  $html .= '<td>' . $lon19 . '</td>';
+  $html .= '</tr>';
+  /* Titis */
+  /* Mazpesca 2 */
+  $html .= '<tr>';
+  $html .= '<td>' . getBarcoName(16, 'barco_name') .
+      '<br><small>' . getTecnico(16) . '</small>' . '</td>';
+  $html .= '<td>' . $results_monday[16]->viaje . '</td>';
+  $html .= '<td>' . statsViajes(16, 'dias_pesca') . '</td>';
+  $html .= '<td>' . $results_monday[16]->total_day . '</td>';
+  $html .= '<td>' . $results_tuesday[16]->total_day . '</td>';
+  $html .= '<td>' . $results_wednesday[16]->total_day . '</td>';
+  $html .= '<td>' . $results_thursday[16]->total_day . '</td>';
+  $html .= '<td>' . $results_friday[16]->total_day . '</td>';
+  $html .= '<td>' . $results_saturday[16]->total_day . '</td>';
+  $html .= '<td>' . $results_sunday[16]->total_day . '</td>';
+  $html .= '<td>' . statsViajes(16, 'vacio') . '</td>';
+  $html .= '<td>' . statsViajes(16, 'abordo') . '</td>';
+  $html .= '<td>' . statsViajes(16, 'tm_x_dia') . '</td>';
+  $html .= '<td>' . statsViajes2(16, 'lances') . '</td>';
+  $html .= '<td>' . statsViajes2(16, 'tons_x_lance') . '</td>';
+  $html .= '<td>' . $lat16 . '</td>';
+  $html .= '<td>' . $lon16 . '</td>';
+  $html .= '</tr>';
+  /* Mazpesca 2 */
+  /* TOTALES */ 
+  for($i = 0; $i <= 19; $i++) {
+    $total_vacio += statsViajes($i, 'vacio');
+    $total_abordo += statsViajes($i, 'abordo');
+  }
+  $html .= '<tr>';
+  $html .= '<td>' . 'TOTAL' . '</td>';
+  $html .= '<td>' . '' . '</td>';
+  $html .= '<td>' . '' . '</td>';
+  $html .= '<td>' . $gran_total_monday . '</td>';
+  $html .= '<td>' . $gran_total_tuesday . '</td>';
+  $html .= '<td>' . $gran_total_wednesday . '</td>';
+  $html .= '<td>' . $gran_total_thursday . '</td>';
+  $html .= '<td>' . $gran_total_friday . '</td>';
+  $html .= '<td>' . $gran_total_saturday . '</td>';
+  $html .= '<td>' . $gran_total_sunday . '</td>';
+  $html .= '<td>' . $total_vacio . '</td>';
+  $html .= '<td>' . $total_abordo . '</td>';
+  $html .= '<td>' . '' . '</td>';
+  $html .= '<td>' . '' . '</td>';
+  $html .= '<td>' . '' . '</td>';
+  $html .= '<td>' . '' . '</td>';
+  $html .= '<td>' . '' . '</td>';
+  $html .= '</tr>';
+  $html .= '</tbody>';
+  $html .= '</table>';
+  $html .= '</div>';
+  /* COMENTARIOS */
+  $html .= '<div class="table-responsive">';
+  $html .= '<table class="table table-hover">';
+  $html .= '<thead>';
+  $html .= '<tr>';
+  $html .= '<th class="text-center">' . 'BARCO' . '</th>';
+  $html .= '<th class="text-center">' . 'PRINCIPALES ACONTECIMIENTOS' . '</th>';
+  $html .= '</tr>';
+  $html .= '</thead>';
+  $html .= '<tbody>';
+  $html .= '<tr>';
+  //$html .= '<td>' . '</td>';
+  /* Azteca 1 */
+  $html .= '<td width="15%">' . getBarcoName(0, 'barco_name') . '<br><small>' . getTecnico(0) . ' '
+      . '</small>' . '</td>';
+  $html .= '<td width="85%">' . getLastComment($results_monday[0]->viaje_nid) . '</td>';
+  $html .= '</tr>';
+  /* Azteca 1 */
+  /* Azteca 2 */
+  $html .= '<tr>';
+  $html .= '<td width="15%">' . getBarcoName(2, 'barco_name') . '<br><small>' . getTecnico(2) . ' '
+      . '</small>' . '</td>';
+  $html .= '<td width="85%">' . getLastComment($results_monday[2]->viaje_nid) . '</td>';
+  $html .= '</tr>';
+  /* Azteca 2 */
+  /* Azteca 3 */
+  $html .= '<tr>';
+  $html .= '<td width="15%">' . getBarcoName(3, 'barco_name') .
+      '<br><small>' . getTecnico(3) . '</small>' . '</td>';
+  $html .= '<td width="85%">' . getLastComment($results_monday[3]->viaje_nid) . '</td>';
+  $html .= '</tr>';
+  /* Azteca 3 */
+  /* Azteca 4 */
+  $html .= '<tr>';
+  $html .= '<td width="15%">' . getBarcoName(4, 'barco_name') .
+      '<br><small>' . getTecnico(4) . '</small>' . '</td>';
+  $html .= '<td width="85%">' . getLastComment($results_monday[4]->viaje_nid) . '</td>';
+  $html .= '</tr>';
+  /* Azteca 4 */
+  /* Azteca 5 */
+  $html .= '<tr>';
+  $html .= '<td width="15%">' . getBarcoName(5, 'barco_name') .
+      '<br><small>' . getTecnico(5) . '</small>' . '</td>';
+  $html .= '<td width="85%">' . getLastComment($results_monday[5]->viaje_nid) . '</td>';
+  $html .= '</tr>';
+  /* Azteca 5 */
+  /* Azteca 6 */
+  $html .= '<tr>';
+  $html .= '<td width="15%">' . getBarcoName(6, 'barco_name') .
+      '<br><small>' . getTecnico(6) . '</small>' . '</td>';
+  $html .= '<td width="85%">' . getLastComment($results_monday[6]->viaje_nid) . '</td>';
+  $html .= '</tr>';
+  /* Azteca 6 */
+  /* Azteca 7 */
+  $html .= '<tr>';
+  $html .= '<td width="15%">' . getBarcoName(7, 'barco_name') .
+      '<br><small>' . getTecnico(7) . '</small>' . '</td>';
+  $html .= '<td width="85%">' . getLastComment($results_monday[7]->viaje_nid) . '</td>';
+  $html .= '</tr>';
+  /* Azteca 7 */
+  /* Azteca 8 */
+  $html .= '<tr>';
+  $html .= '<td width="15%">' . getBarcoName(8, 'barco_name') .
+      '<br><small>' . getTecnico(8) . '</small>' . '</td>';
+  $html .= '<td width="85%">' . getLastComment($results_monday[8]->viaje_nid) . '</td>';
+  $html .= '</tr>';
+  /* Azteca 8 */
+  /* Azteca 9 */
+  $html .= '<tr>';
+  $html .= '<td width="15%">' . getBarcoName(9, 'barco_name') .
+      '<br><small>' . getTecnico(9) . '</small>' . '</td>';
+  $html .= '<td width="85%">' . getLastComment($results_monday[9]->viaje_nid) . '</td>';
+  $html .= '</tr>';
+  /* Azteca 9 */
+  /* Azteca 10 */
+  $html .= '<td width="15%">' . getBarcoName(1, 'barco_name') . '<br><small>' .
+      getTecnico(1) . '</small>' . '</td>';
+  $html .= '<td width="85%">' . getLastComment($results_monday[1]->viaje_nid) . '</td>';
+  $html .= '</tr>';
+  /* Azteca 10*/
+  /* Mazatun */
+  $html .= '<tr>';
+  $html .= '<td width="15%">' . getBarcoName(15, 'barco_name') .
+      '<br><small>' . getTecnico(15) . '</small>' . '</td>';
+  $html .= '<td width="85%">' . getLastComment($results_monday[15]->viaje_nid) . '</td>';
+  $html .= '</tr>';
+  /* Mazatun */
+  /* Clipperton */
+  $html .= '<tr>';
+  $html .= '<td width="15%">' . getBarcoName(11, 'barco_name') .
+      '<br><small>' . getTecnico(11) . '</small>' . '</td>';
+  $html .= '<td width="85%">' . getLastComment($results_monday[11]->viaje_nid) . '</td>';
+  $html .= '</tr>';
+  /* Clipperton */
+  /* El Dorado */
+  $html .= '<tr>';
+  $html .= '<td width="15%">' . getBarcoName(12, 'barco_name') .
+      '<br><small>' . getTecnico(12) . '</small>' . '</td>';
+  $html .= '<td width="85%">' . getLastComment($results_monday[12]->viaje_nid) . '</td>';
+  $html .= '</tr>';
+  /* El Dorado */
+  /* Franz */
+  $html .= '<tr>';
+  $html .= '<td width="15%">' . getBarcoName(13, 'barco_name') .
+      '<br><small>' . getTecnico(13) . '</small>' . '</td>';
+  $html .= '<td width="85%">' . getLastComment($results_monday[13]->viaje_nid) . '</td>';
+  $html .= '</tr>';
+  /* Franz */
+  /* Hanna */
+  $html .= '<tr>';
+  $html .= '<td width="15%">' . getBarcoName(14, 'barco_name') .
+      '<br><small>' . getTecnico(14) . '</small>' . '</td>';
+  $html .= '<td width="85%">' . getLastComment($results_monday[14]->viaje_nid) . '</td>';
+  $html .= '</tr>';
+  /* Hanna */
+  /* Tamara */
+  $html .= '<tr>';
+  $html .= '<td width="15%">' . getBarcoName(18, 'barco_name') .
+      '<br><small>' . getTecnico(18) . '</small>' . '</td>';
+  $html .= '<td width="85%">' . getLastComment($results_monday[18]->viaje_nid) . '</td>';
+  $html .= '</tr>';
+  /* Tamara */
+  /* Camila */
+  $html .= '<tr>';
+  $html .= '<td width="15%">' . getBarcoName(10, 'barco_name') .
+      '<br><small>' . getTecnico(10) . '</small>' . '</td>';
+  $html .= '<td width="85%">' . getLastComment($results_monday[10]->viaje_nid) . '</td>';
+  $html .= '</tr>';
+  /* Camila */
+  /* Paco C */
+  $html .= '<tr>';
+  $html .= '<td width="15%">' . getBarcoName(17, 'barco_name') .
+      '<br><small>' . getTecnico(17) . '</small>' . '</td>';
+  $html .= '<td width="85%">' . getLastComment($results_monday[17]->viaje_nid) . '</td>';
+  $html .= '</tr>';
+  /* Paco C */
+  /* Titis */
+  $html .= '<tr>';
+  $html .= '<td width="15%">' . getBarcoName(19, 'barco_name') .
+      '<br><small>' . getTecnico(19) . '</small>' . '</td>';
+  $html .= '<td width="85%">' . getLastComment($results_monday[19]->viaje_nid) . '</td>';
+  $html .= '</tr>';
+  /* Titis */
+  /* Mazpesca 2 */
+  $html .= '<tr>';
+  $html .= '<td width="15%">' . getBarcoName(16, 'barco_name') .
+      '<br><small>' . getTecnico(16) . '</small>' . '</td>';
+  $html .= '<td width="85%">' . getLastComment($results_monday[16]->viaje_nid) . '</td>';
+  $html .= '</tr>';
+  /* Nota General */
+  $html .= '<tr>';
+  $html .= '<td width="15%">' . "NOTA GENERAL" . '</td>';
+  $html .= '<td width="85%">' . getNotaGeneral() . '</td>';
+  $html .= '</tr>';
+  /* Nota General */
+  $html .= '</tbody>';
+  $html .= '</table>';
+  $html .= '</div>';
+  drupal_set_message(t('Semana del ' . $monday . ' al ' . $sunday));
+
+  return $html;
+
+}
+
+/* Generate Excel File */
+function reporte_flota_export_excel() {
+  
+  include_once(libraries_get_path('PHPExcel1_8') . '/PHPExcel.php');
+  
+  /* Days */
+  $monday = date('Y-m-d', createDayWeek("1"));
+  $tuesday = date('Y-m-d', createDayWeek("2"));
+  $wednesday = date('Y-m-d', createDayWeek("3"));
+  $thursday = date('Y-m-d', createDayWeek("4"));
+  $friday = date('Y-m-d', createDayWeek("5"));
+  $saturday = date('Y-m-d', createDayWeek("6"));
+  $sunday = date('Y-m-d', createDayWeek("7"));
+  $results_monday = getDay($monday);
+  $results_tuesday = getDay($tuesday);
+  $results_wednesday = getDay($wednesday);
+  $results_thursday = getDay($thursday);
+  $results_friday = getDay($friday);
+  $results_saturday = getDay($saturday);
+  $results_sunday = getDay($sunday);
+  
+  /* TOTALES */
+  foreach ($results_monday as $result_monday) {
+    $total_monday = $result_monday->total_day;
+    $gran_total_monday += $total_monday;
+  }
+  foreach ($results_tuesday as $result_tuesday) {
+    $gran_total_tuesday += $result_tuesday->total_day;
+  }
+  foreach ($results_wednesday as $result_wednesday) {
+    $gran_total_wednesday += $result_wednesday->total_day;
+  }
+  foreach ($results_thursday as $result_thursday) {
+    $gran_total_thursday += $result_thursday->total_day;
+  }
+  foreach ($results_friday as $result_friday) {
+    $gran_total_friday += $result_friday->total_day;
+  }
+  foreach ($results_saturday as $result_saturday) {
+    $gran_total_saturday += $result_saturday->total_day;
+  }
+  foreach ($results_sunday as $result_sunday) {
+    $gran_total_sunday += $result_sunday->total_day;
+  }
+  
+  /*
+   * Get last coordinates
+   */
+  $lat0 = (isset($results_monday[0]->viaje_nid)) ? getLastCoord($results_monday[0]->viaje_nid, 'lat') : '';
+  $lon0 = (isset($results_monday[0]->viaje_nid)) ? getLastCoord($results_monday[0]->viaje_nid, 'lon') : '';
+  $lat0 = turnDDtoDMS($lat0);
+  $lon0 = turnDDtoDMS($lon0);
+  $lat1 = (isset($results_monday[1]->viaje_nid)) ? getLastCoord($results_monday[1]->viaje_nid, 'lat') : '';
+  $lon1 = (isset($results_monday[1]->viaje_nid)) ? getLastCoord($results_monday[1]->viaje_nid, 'lon') : '';
+  $lat1 = turnDDtoDMS($lat1);
+  $lon1 = turnDDtoDMS($lon1);
+  $lat2 = (isset($results_monday[2]->viaje_nid)) ? getLastCoord($results_monday[2]->viaje_nid, 'lat') : '';
+  $lon2 = (isset($results_monday[2]->viaje_nid)) ? getLastCoord($results_monday[2]->viaje_nid, 'lon') : '';
+  $lat2 = turnDDtoDMS($lat2);
+  $lon2 = turnDDtoDMS($lon2);
+  $lat3 = (isset($results_monday[3]->viaje_nid)) ? getLastCoord($results_monday[3]->viaje_nid, 'lat') : '';
+  $lon3 = (isset($results_monday[3]->viaje_nid)) ? getLastCoord($results_monday[3]->viaje_nid, 'lon') : '';
+  $lat3 = turnDDtoDMS($lat3);
+  $lon3 = turnDDtoDMS($lon3);
+  $lat4 = (isset($results_monday[4]->viaje_nid)) ? getLastCoord($results_monday[4]->viaje_nid, 'lat') : '';
+  $lon4 = (isset($results_monday[4]->viaje_nid)) ? getLastCoord($results_monday[4]->viaje_nid, 'lon') : '';
+  $lat4 = turnDDtoDMS($lat4);
+  $lon4 = turnDDtoDMS($lon4);
+  $lat5 = (isset($results_monday[5]->viaje_nid)) ? getLastCoord($results_monday[5]->viaje_nid, 'lat') : '';
+  $lon5 = (isset($results_monday[5]->viaje_nid)) ? getLastCoord($results_monday[5]->viaje_nid, 'lon') : '';
+  $lat5 = turnDDtoDMS($lat5);
+  $lon5 = turnDDtoDMS($lon5);
+  $lat6 = (isset($results_monday[6]->viaje_nid)) ? getLastCoord($results_monday[6]->viaje_nid, 'lat') : '';
+  $lon6 = (isset($results_monday[6]->viaje_nid)) ? getLastCoord($results_monday[6]->viaje_nid, 'lon') : '';
+  $lat6 = turnDDtoDMS($lat6);
+  $lon6 = turnDDtoDMS($lon6);
+  $lat7 = (isset($results_monday[7]->viaje_nid)) ? getLastCoord($results_monday[7]->viaje_nid, 'lat') : '';
+  $lon7 = (isset($results_monday[7]->viaje_nid)) ? getLastCoord($results_monday[7]->viaje_nid, 'lon') : '';
+  $lat7 = turnDDtoDMS($lat7);
+  $lon7 = turnDDtoDMS($lon7);
+  $lat8 = (isset($results_monday[8]->viaje_nid)) ? getLastCoord($results_monday[8]->viaje_nid, 'lat') : '';
+  $lon8 = (isset($results_monday[8]->viaje_nid)) ? getLastCoord($results_monday[8]->viaje_nid, 'lon') : '';
+  $lat8 = turnDDtoDMS($lat8);
+  $lon8 = turnDDtoDMS($lon8);
+  $lat9 = (isset($results_monday[9]->viaje_nid)) ? getLastCoord($results_monday[9]->viaje_nid, 'lat') : '';
+  $lon9 = (isset($results_monday[9]->viaje_nid)) ? getLastCoord($results_monday[9]->viaje_nid, 'lon') : '';
+  $lat9 = turnDDtoDMS($lat9);
+  $lon9 = turnDDtoDMS($lon9);
+  $lat10 = (isset($results_monday[10]->viaje_nid)) ? getLastCoord($results_monday[10]->viaje_nid, 'lat') : '';
+  $lon10 = (isset($results_monday[10]->viaje_nid)) ? getLastCoord($results_monday[10]->viaje_nid, 'lon') : '';
+  $lat10 = turnDDtoDMS($lat10);
+  $lon10 = turnDDtoDMS($lon10);
+  $lat11 = (isset($results_monday[11]->viaje_nid)) ? getLastCoord($results_monday[11]->viaje_nid, 'lat') : '';
+  $lon11 = (isset($results_monday[11]->viaje_nid)) ? getLastCoord($results_monday[11]->viaje_nid, 'lon') : '';
+  $lat11 = turnDDtoDMS($lat11);
+  $lon11 = turnDDtoDMS($lon11);
+  $lat12 = (isset($results_monday[12]->viaje_nid)) ? getLastCoord($results_monday[12]->viaje_nid, 'lat') : '';
+  $lon12 = (isset($results_monday[12]->viaje_nid)) ? getLastCoord($results_monday[12]->viaje_nid, 'lon') : '';
+  $lat12 = turnDDtoDMS($lat12);
+  $lon12 = turnDDtoDMS($lon12);
+  $lat13 = (isset($results_monday[13]->viaje_nid)) ? getLastCoord($results_monday[13]->viaje_nid, 'lat') : '';
+  $lon13 = (isset($results_monday[13]->viaje_nid)) ? getLastCoord($results_monday[13]->viaje_nid, 'lon') : '';
+  $lat13 = turnDDtoDMS($lat13);
+  $lon13 = turnDDtoDMS($lon13);
+  $lat14 = (isset($results_monday[14]->viaje_nid)) ? getLastCoord($results_monday[14]->viaje_nid, 'lat') : '';
+  $lon14 = (isset($results_monday[14]->viaje_nid)) ? getLastCoord($results_monday[14]->viaje_nid, 'lon') : '';
+  $lat14 = turnDDtoDMS($lat14);
+  $lon14 = turnDDtoDMS($lon14);
+  $lat15 = (isset($results_monday[15]->viaje_nid)) ? getLastCoord($results_monday[15]->viaje_nid, 'lat') : '';
+  $lon15 = (isset($results_monday[15]->viaje_nid)) ? getLastCoord($results_monday[15]->viaje_nid, 'lon') : '';
+  $lat15 = turnDDtoDMS($lat15);
+  $lon15 = turnDDtoDMS($lon15);
+  $lat16 = (isset($results_monday[16]->viaje_nid)) ? getLastCoord($results_monday[16]->viaje_nid, 'lat') : '';
+  $lon16 = (isset($results_monday[16]->viaje_nid)) ? getLastCoord($results_monday[16]->viaje_nid, 'lon') : '';
+  $lat16 = turnDDtoDMS($lat16);
+  $lon16 = turnDDtoDMS($lon16);
+  $lat17 = (isset($results_monday[17]->viaje_nid)) ? getLastCoord($results_monday[17]->viaje_nid, 'lat') : '';
+  $lon17 = (isset($results_monday[17]->viaje_nid)) ? getLastCoord($results_monday[17]->viaje_nid, 'lon') : '';
+  $lat17 = turnDDtoDMS($lat17);
+  $lon17 = turnDDtoDMS($lon17);
+  $lat18 = (isset($results_monday[18]->viaje_nid)) ? getLastCoord($results_monday[18]->viaje_nid, 'lat') : '';
+  $lon18 = (isset($results_monday[18]->viaje_nid)) ? getLastCoord($results_monday[18]->viaje_nid, 'lon') : '';
+  $lat18 = turnDDtoDMS($lat18);
+  $lon18 = turnDDtoDMS($lon18);
+  $lat19 = (isset($results_monday[19]->viaje_nid)) ? getLastCoord($results_monday[19]->viaje_nid, 'lat') : '';
+  $lon19 = (isset($results_monday[19]->viaje_nid)) ? getLastCoord($results_monday[19]->viaje_nid, 'lon') : '';
+  $lat19 = turnDDtoDMS($lat19);
+  $lon19 = turnDDtoDMS($lon19);
+  
+  
+  $objPHPExcel = new PHPExcel();
+  $objPHPExcel->getProperties()->setCreator("www.mazpesca.com")
+    ->setLastModifiedBy("www.mazpesca.com")
+    ->setTitle("Reporte Semanal")
+    ->setSubject("Mazpesca")
+    ->setDescription("Reporte Diario de la Flota.")
+    ->setKeywords("Excel Mazpesca.COM")
+    ->setCategory("Test result file");
+  $active_sheet = $objPHPExcel->getActiveSheet();
+  $active_sheet->getSheetView()->setZoomScale(85);
+  $objPHPExcel->getDefaultStyle()->getAlignment()->setVertical(
+      PHPExcel_Style_Alignment::VERTICAL_TOP);
+  $objPHPExcel->getDefaultStyle()->getAlignment()->setHorizontal(
+      PHPExcel_Style_Alignment::HORIZONTAL_CENTER);
+  $objPHPExcel->getDefaultStyle()->getFont()->setName('Arial');
+  $objPHPExcel->getDefaultStyle()->getFont()->setSize(13);
+  $objPHPExcel->setActiveSheetIndex(0);
+  
+  // Add some data to first sheet
+  $styleArray = array(
+  'borders' => array(
+    'allborders' => array(
+      'style' => PHPExcel_Style_Border::BORDER_MEDIUM
+      )
+    )
+  );
+  $styleThin = array(
+  'borders' => array(
+    'allborders' => array(
+      'style' => PHPExcel_Style_Border::BORDER_THIN
+      )
+    )
+  );
+  
+  $noBorder = array(
+  'borders' => array(
+    'allborders' => array(
+      'style' => PHPExcel_Style_Border::BORDER_NONE
+      )
+    )
+  );
+  
+  $small_font = array(
+    'font'  => array(
+        'bold' => true,
+        //'color' => array('rgb' => 'FF0000'),
+        'size'  => 6,
+        'name' => 'Aria'
+    ));
+  $font_bold11 = array(
+    'font'  => array(
+        //'bold' => true,
+        //'color' => array('rgb' => 'FF0000'),
+        'size'  => 11,
+        'name' => 'Aria'
+    ));
+  $barcos_style = array(
+    'font'  => array(
+        //'bold' => true,
+        //'color' => array('rgb' => 'FF0000'),
+        'size'  => 12,
+        'name' => 'Aria'
+    ));
+  
+  $font_style20 = array(
+    'font'  => array(
+        //'bold' => true,
+        //'color' => array('rgb' => 'FF0000'),
+        'size'  => 20,
+        'name' => 'Aria'
+    ));
+  
+  $total_style = array(
+    'font'  => array(
+        //'bold' => true,
+        //'color' => array('rgb' => 'FF0000'),
+        'size'  => 14,
+        'name' => 'Aria'
+    ));
+  
+  $styleRightBorder = array(
+    'borders' => array(
+      'outline' => array(
+        'style' => PHPExcel_Style_Border::BORDER_THICK,
+	'color' => array('argb' => 'FFFF0000'),
+        ),
+      ),
+    );
+  
+  //$objPHPExcel->getActiveSheet()->getStyle('A9:A28')->applyFromArray($styleRightBorder);
+
+  /* Fonts and Borders */
+  $objPHPExcel->getActiveSheet()->getStyle('A30:AA33')->applyFromArray($noBorder);
+  $objPHPExcel->getActiveSheet()->getStyle('A1:AA4')->applyFromArray($noBorder);
+  $objPHPExcel->getActiveSheet()->getStyle('A5:Q8')->applyFromArray($styleArray);
+  $objPHPExcel->getActiveSheet()->getStyle('A9:Q29')->applyFromArray($styleThin);
+  $objPHPExcel->getActiveSheet()->getStyle('T9:T29')->applyFromArray($styleThin);
+  $objPHPExcel->getActiveSheet()->getStyle('V9:W29')->applyFromArray($styleThin);
+  $objPHPExcel->getActiveSheet()->getStyle('Y9:AA29')->applyFromArray($styleThin);
+  $objPHPExcel->getActiveSheet()->getStyle('A34:AA55')->applyFromArray($styleThin);
+  $objPHPExcel->getActiveSheet()->getStyle('T5:T8')->applyFromArray($styleArray);
+  $objPHPExcel->getActiveSheet()->getStyle('V5:W8')->applyFromArray($styleArray);
+  $objPHPExcel->getActiveSheet()->getStyle('Y5:AA8')->applyFromArray($styleArray);
+  $objPHPExcel->getActiveSheet()->getStyle('A34:AA34')->applyFromArray($styleArray);
+  $objPHPExcel->getActiveSheet()->getStyle('A9:A28')->applyFromArray($barcos_style);
+  $objPHPExcel->getActiveSheet()->getStyle('A35:A54')->applyFromArray($barcos_style);
+  $objPHPExcel->getActiveSheet()->getStyle('B5')->applyFromArray($font_bold11);
+  $objPHPExcel->getActiveSheet()->getStyle('A29')->applyFromArray($total_style);
+  $objPHPExcel->getActiveSheet()->getStyle('D6')->applyFromArray($font_bold11);
+  $objPHPExcel->getActiveSheet()->getStyle('F6')->applyFromArray($font_bold11);
+  $objPHPExcel->getActiveSheet()->getStyle('G6')->applyFromArray($font_bold11);
+  $objPHPExcel->getActiveSheet()->getStyle('H6')->applyFromArray($font_bold11);
+  $objPHPExcel->getActiveSheet()->getStyle('I6')->applyFromArray($font_bold11);
+  $objPHPExcel->getActiveSheet()->getStyle('J6')->applyFromArray($font_bold11);
+  $objPHPExcel->getActiveSheet()->getStyle('K6')->applyFromArray($font_bold11);
+  $objPHPExcel->getActiveSheet()->getStyle('L6')->applyFromArray($font_bold11);
+  $objPHPExcel->getActiveSheet()->getStyle('M6')->applyFromArray($font_bold11);
+  $objPHPExcel->getActiveSheet()->getStyle('N6')->applyFromArray($font_bold11);
+  $objPHPExcel->getActiveSheet()->getStyle('O6')->applyFromArray($font_bold11);
+  $objPHPExcel->getActiveSheet()->getStyle('P6')->applyFromArray($font_bold11);
+  $objPHPExcel->getActiveSheet()->getStyle('Q6')->applyFromArray($font_bold11);
+  
+  for($i = 5; $i <= 8; $i++) {
+    $objPHPExcel->getActiveSheet()->getStyle('A' . $i)->getFill()->setFillType(PHPExcel_Style_Fill::FILL_SOLID);
+    $objPHPExcel->getActiveSheet()->getStyle('A' . $i)->getFill()->getStartColor()->setRGB('83BB4B');
+    $objPHPExcel->getActiveSheet()->getStyle('B' . $i)->getFill()->setFillType(PHPExcel_Style_Fill::FILL_SOLID);
+    $objPHPExcel->getActiveSheet()->getStyle('B' . $i)->getFill()->getStartColor()->setRGB('83BB4B');
+    $objPHPExcel->getActiveSheet()->getStyle('D' . $i)->getFill()->setFillType(PHPExcel_Style_Fill::FILL_SOLID);
+    $objPHPExcel->getActiveSheet()->getStyle('D' . $i)->getFill()->getStartColor()->setRGB('83BB4B');
+    $objPHPExcel->getActiveSheet()->getStyle('H' . $i)->getFill()->setFillType(PHPExcel_Style_Fill::FILL_SOLID);
+    $objPHPExcel->getActiveSheet()->getStyle('H' . $i)->getFill()->getStartColor()->setRGB('83BB4B');
+    $objPHPExcel->getActiveSheet()->getStyle('F' . $i)->getFill()->setFillType(PHPExcel_Style_Fill::FILL_SOLID);
+    $objPHPExcel->getActiveSheet()->getStyle('F' . $i)->getFill()->getStartColor()->setRGB('83BB4B');
+    $objPHPExcel->getActiveSheet()->getStyle('G' . $i)->getFill()->setFillType(PHPExcel_Style_Fill::FILL_SOLID);
+    $objPHPExcel->getActiveSheet()->getStyle('G' . $i)->getFill()->getStartColor()->setRGB('83BB4B');
+    $objPHPExcel->getActiveSheet()->getStyle('I' . $i)->getFill()->setFillType(PHPExcel_Style_Fill::FILL_SOLID);
+    $objPHPExcel->getActiveSheet()->getStyle('I' . $i)->getFill()->getStartColor()->setRGB('83BB4B');
+    $objPHPExcel->getActiveSheet()->getStyle('J' . $i)->getFill()->setFillType(PHPExcel_Style_Fill::FILL_SOLID);
+    $objPHPExcel->getActiveSheet()->getStyle('J' . $i)->getFill()->getStartColor()->setRGB('83BB4B');
+    $objPHPExcel->getActiveSheet()->getStyle('K' . $i)->getFill()->setFillType(PHPExcel_Style_Fill::FILL_SOLID);
+    $objPHPExcel->getActiveSheet()->getStyle('K' . $i)->getFill()->getStartColor()->setRGB('83BB4B');
+    $objPHPExcel->getActiveSheet()->getStyle('L' . $i)->getFill()->setFillType(PHPExcel_Style_Fill::FILL_SOLID);
+    $objPHPExcel->getActiveSheet()->getStyle('L' . $i)->getFill()->getStartColor()->setRGB('83BB4B');
+    $objPHPExcel->getActiveSheet()->getStyle('M' . $i)->getFill()->setFillType(PHPExcel_Style_Fill::FILL_SOLID);
+    $objPHPExcel->getActiveSheet()->getStyle('M' . $i)->getFill()->getStartColor()->setRGB('83BB4B');
+    $objPHPExcel->getActiveSheet()->getStyle('N' . $i)->getFill()->setFillType(PHPExcel_Style_Fill::FILL_SOLID);
+    $objPHPExcel->getActiveSheet()->getStyle('N' . $i)->getFill()->getStartColor()->setRGB('83BB4B');
+    $objPHPExcel->getActiveSheet()->getStyle('O' . $i)->getFill()->setFillType(PHPExcel_Style_Fill::FILL_SOLID);
+    $objPHPExcel->getActiveSheet()->getStyle('O' . $i)->getFill()->getStartColor()->setRGB('83BB4B');
+    $objPHPExcel->getActiveSheet()->getStyle('P' . $i)->getFill()->setFillType(PHPExcel_Style_Fill::FILL_SOLID);
+    $objPHPExcel->getActiveSheet()->getStyle('P' . $i)->getFill()->getStartColor()->setRGB('83BB4B');
+    $objPHPExcel->getActiveSheet()->getStyle('Q' . $i)->getFill()->setFillType(PHPExcel_Style_Fill::FILL_SOLID);
+    $objPHPExcel->getActiveSheet()->getStyle('Q' . $i)->getFill()->getStartColor()->setRGB('83BB4B');
+    $objPHPExcel->getActiveSheet()->getStyle('T' . $i)->getFill()->setFillType(PHPExcel_Style_Fill::FILL_SOLID);
+    $objPHPExcel->getActiveSheet()->getStyle('T' . $i)->getFill()->getStartColor()->setRGB('83BB4B');
+    $objPHPExcel->getActiveSheet()->getStyle('V' . $i)->getFill()->setFillType(PHPExcel_Style_Fill::FILL_SOLID);
+    $objPHPExcel->getActiveSheet()->getStyle('V' . $i)->getFill()->getStartColor()->setRGB('83BB4B');
+    $objPHPExcel->getActiveSheet()->getStyle('W' . $i)->getFill()->setFillType(PHPExcel_Style_Fill::FILL_SOLID);
+    $objPHPExcel->getActiveSheet()->getStyle('W' . $i)->getFill()->getStartColor()->setRGB('83BB4B');
+    $objPHPExcel->getActiveSheet()->getStyle('Y' . $i)->getFill()->setFillType(PHPExcel_Style_Fill::FILL_SOLID);
+    $objPHPExcel->getActiveSheet()->getStyle('Y' . $i)->getFill()->getStartColor()->setRGB('83BB4B');
+    $objPHPExcel->getActiveSheet()->getStyle('Z' . $i)->getFill()->setFillType(PHPExcel_Style_Fill::FILL_SOLID);
+    $objPHPExcel->getActiveSheet()->getStyle('Z' . $i)->getFill()->getStartColor()->setRGB('83BB4B');
+    $objPHPExcel->getActiveSheet()->getStyle('AA' . $i)->getFill()->setFillType(PHPExcel_Style_Fill::FILL_SOLID);
+    $objPHPExcel->getActiveSheet()->getStyle('AA' . $i)->getFill()->getStartColor()->setRGB('83BB4B');
+    
+  }
+
+  
+  $objPHPExcel->getActiveSheet()->getStyle('A34')->getFill()->setFillType(PHPExcel_Style_Fill::FILL_SOLID);
+  $objPHPExcel->getActiveSheet()->getStyle('A34')->getFill()->getStartColor()->setRGB('83BB4B');
+  $objPHPExcel->getActiveSheet()->getStyle('B34')->getFill()->setFillType(PHPExcel_Style_Fill::FILL_SOLID);
+  $objPHPExcel->getActiveSheet()->getStyle('B34')->getFill()->getStartColor()->setRGB('83BB4B');
+  $objPHPExcel->getActiveSheet()->getStyle('C34')->getFill()->setFillType(PHPExcel_Style_Fill::FILL_SOLID);
+  $objPHPExcel->getActiveSheet()->getStyle('C34')->getFill()->getStartColor()->setRGB('83BB4B');
+  
+  $active_sheet->getStyle('A34:AA34')->getAlignment()->setVertical(
+      PHPExcel_Style_Alignment::VERTICAL_CENTER);
+  
+  
+  $active_sheet->getStyle('A5')->getFont()->setBold(true);
+  //$active_sheet->getStyle('B5')->getFont()->setBold(true);
+  $active_sheet->getStyle('A34')->getFont()->setBold(true);
+  $active_sheet->getStyle('B34')->getFont()->setBold(true);
+  $active_sheet->getStyle('C34')->getFont()->setBold(true);
+  //$active_sheet->getColumnDimensionByColumn('A33')->setAutoSize(false);
+  $active_sheet->getColumnDimension('A')->setWidth(20.33);
+  $active_sheet->getColumnDimension('B')->setWidth(3.50);
+  $active_sheet->getColumnDimension('C')->setWidth(3.50);
+  $active_sheet->getColumnDimension('D')->setWidth(9.83);
+  $active_sheet->getColumnDimension('E')->setWidth(0.01);
+  $active_sheet->getColumnDimension('F')->setWidth(9.83);
+  $active_sheet->getColumnDimension('G')->setWidth(9.83);
+  $active_sheet->getColumnDimension('H')->setWidth(11.50);
+  $active_sheet->getColumnDimension('I')->setWidth(5.00);
+  $active_sheet->getColumnDimension('J')->setWidth(5.00);
+  $active_sheet->getColumnDimension('K')->setWidth(5.00);
+  $active_sheet->getColumnDimension('L')->setWidth(5.00);
+  $active_sheet->getColumnDimension('M')->setWidth(5.00);
+  $active_sheet->getColumnDimension('N')->setWidth(5.00);
+  $active_sheet->getColumnDimension('O')->setWidth(5.00);
+  $active_sheet->getColumnDimension('P')->setWidth(9.83);
+  $active_sheet->getColumnDimension('Q')->setWidth(9.83);
+  $active_sheet->getColumnDimension('R')->setWidth(0.01);
+  $active_sheet->getColumnDimension('S')->setWidth(2.00);
+  $active_sheet->getColumnDimension('U')->setWidth(2.00);
+  $active_sheet->getColumnDimension('X')->setWidth(2.00);
+  $active_sheet->getRowDimension('5')->setRowHeight(33);
+  $active_sheet->getRowDimension('9')->setRowHeight(35);
+  //$active_sheet->getColumnDimensionByColumn('B33')->setAutoSize(false);
+  //$active_sheet->getColumnDimensionByColumn('B')->setWidth(3.67);
+  $active_sheet->getStyle('A5:A8')->getAlignment()->setVertical(
+      PHPExcel_Style_Alignment::VERTICAL_CENTER);
+  $active_sheet->setCellValue('A5', 'BARCO');
+  $active_sheet->getStyle('B5:C5')->getAlignment()->setVertical(
+      PHPExcel_Style_Alignment::VERTICAL_CENTER);
+  $active_sheet->setCellValue('B5', "VIAJE " . "\r" . "No.");
+  $active_sheet->getStyle('B5')->getAlignment()->setWrapText(true);
+  
+  $active_sheet->getStyle('J1')->applyFromArray($font_style20);
+  $active_sheet->getStyle('J1:AA1')->getAlignment()->setVertical(
+    PHPExcel_Style_Alignment::VERTICAL_CENTER);
+  $active_sheet->setCellValue('J1', 'REPORTE DIARIO DE LA FLOTA');
+  $active_sheet->mergeCells('J1:AA1');
+  
+  $active_sheet->getStyle('H5:Q5')->getAlignment()->setVertical(
+      PHPExcel_Style_Alignment::VERTICAL_CENTER);
+  $active_sheet->setCellValue('H5', 'CAPTURAS ESTE VIAJE T.M.');
+  $active_sheet->mergeCells('H5:Q5');
+  
+  $active_sheet->getStyle('D5')->getFont()->setBold(true);
+  $active_sheet->getStyle('D5:G5')->getAlignment()->setVertical(
+      PHPExcel_Style_Alignment::VERTICAL_CENTER);
+  $active_sheet->setCellValue('D5', 'DÍAS');
+  
+  $active_sheet->getStyle('D6')->getFont()->setBold(true);
+  $active_sheet->getStyle('D6:D8')->getAlignment()->setVertical(
+      PHPExcel_Style_Alignment::VERTICAL_CENTER);
+  $active_sheet->setCellValue('D6', "VIAJE " . "\r" . "ACTUAL");
+  $active_sheet->getStyle('D6')->getAlignment()->setWrapText(true);
+  
+  $active_sheet->getStyle('H6')->getFont()->setBold(true);
+  $active_sheet->getStyle('H6:H8')->getAlignment()->setVertical(
+      PHPExcel_Style_Alignment::VERTICAL_CENTER);
+  $active_sheet->setCellValue('H6', "ACUM. " . "\r" . "ÚLTIMO" . "\r" . "DOMINGO");
+  $active_sheet->getStyle('H6')->getAlignment()->setWrapText(true);
+  $active_sheet->mergeCells('H6:H8');
+  
+  $active_sheet->getStyle('I6:Q6')->getFont()->setBold(true);
+  $active_sheet->getStyle('I6:I8')->getAlignment()->setVertical(
+      PHPExcel_Style_Alignment::VERTICAL_CENTER);
+  $active_sheet->setCellValue('I6', "LUN");
+  $active_sheet->getStyle('I6')->getAlignment()->setWrapText(true);
+  $active_sheet->mergeCells('I6:I8');
+  
+  $active_sheet->getStyle('J6:J8')->getAlignment()->setVertical(
+      PHPExcel_Style_Alignment::VERTICAL_CENTER);
+  $active_sheet->setCellValue('J6', "MAR");
+  $active_sheet->getStyle('J6')->getAlignment()->setWrapText(true);
+  $active_sheet->mergeCells('J6:J8');
+  
+  $active_sheet->getStyle('K6:K8')->getAlignment()->setVertical(
+      PHPExcel_Style_Alignment::VERTICAL_CENTER);
+  $active_sheet->setCellValue('K6', "MIER");
+  $active_sheet->getStyle('K6')->getAlignment()->setWrapText(true);
+  $active_sheet->mergeCells('K6:K8');
+  
+  $active_sheet->getStyle('L6:L8')->getAlignment()->setVertical(
+      PHPExcel_Style_Alignment::VERTICAL_CENTER);
+  $active_sheet->setCellValue('L6', "JUE");
+  $active_sheet->getStyle('L6')->getAlignment()->setWrapText(true);
+  $active_sheet->mergeCells('L6:L8');
+  
+  $active_sheet->getStyle('M6:M8')->getAlignment()->setVertical(
+      PHPExcel_Style_Alignment::VERTICAL_CENTER);
+  $active_sheet->setCellValue('M6', "VIE");
+  $active_sheet->getStyle('M6')->getAlignment()->setWrapText(true);
+  $active_sheet->mergeCells('M6:M8');
+  
+  $active_sheet->getStyle('N6:N8')->getAlignment()->setVertical(
+      PHPExcel_Style_Alignment::VERTICAL_CENTER);
+  $active_sheet->setCellValue('N6', "SAB");
+  $active_sheet->getStyle('N6')->getAlignment()->setWrapText(true);
+  $active_sheet->mergeCells('N6:N8');
+  
+  $active_sheet->getStyle('O6:O8')->getAlignment()->setVertical(
+      PHPExcel_Style_Alignment::VERTICAL_CENTER);
+  $active_sheet->setCellValue('O6', "DOM");
+  $active_sheet->getStyle('O6')->getAlignment()->setWrapText(true);
+  $active_sheet->mergeCells('O6:O8');
+  
+  $active_sheet->getStyle('P6:P8')->getAlignment()->setVertical(
+      PHPExcel_Style_Alignment::VERTICAL_CENTER);
+  $active_sheet->setCellValue('P6', "TANQUES " . "\r" . "VACÍOS");
+  $active_sheet->getStyle('P6')->getAlignment()->setWrapText(true);
+  $active_sheet->mergeCells('P6:P8');
+  
+  $active_sheet->getStyle('Q6:Q8')->getAlignment()->setVertical(
+      PHPExcel_Style_Alignment::VERTICAL_CENTER);
+  $active_sheet->setCellValue('Q6', "A " . "\r" . "BORDO");
+  $active_sheet->getStyle('Q6')->getAlignment()->setWrapText(true);
+  $active_sheet->mergeCells('Q6:Q8');
+  
+  $active_sheet->getStyle('F6')->getFont()->setBold(true);
+  $active_sheet->getStyle('F6:F8')->getAlignment()->setVertical(
+      PHPExcel_Style_Alignment::VERTICAL_CENTER);
+  $active_sheet->setCellValue('F6', "VIAJE " . "\r" . "ANTERIOR");
+  $active_sheet->getStyle('F6')->getAlignment()->setWrapText(true);
+  
+  $active_sheet->getStyle('G6')->getFont()->setBold(true);
+  $active_sheet->getStyle('G6:G8')->getAlignment()->setVertical(
+      PHPExcel_Style_Alignment::VERTICAL_CENTER);
+  $active_sheet->setCellValue('G6', "ESTADÍA " . "\r" . "ANTERIOR");
+  $active_sheet->getStyle('G6')->getAlignment()->setWrapText(true);
+  
+  $active_sheet->getStyle('T5')->getFont()->setBold(true);
+  $active_sheet->getStyle('T5:T8')->getAlignment()->setVertical(
+      PHPExcel_Style_Alignment::VERTICAL_CENTER);
+  $active_sheet->setCellValue('T5', "TM. " . "\r" . "x" . "\r" . "DÍA");
+  $active_sheet->getStyle('T5')->getAlignment()->setWrapText(true);
+  $active_sheet->mergeCells('T5:T8');
+  
+  $active_sheet->getStyle('V5')->getFont()->setBold(true);
+  $active_sheet->getStyle('V5:W5')->getAlignment()->setVertical(
+      PHPExcel_Style_Alignment::VERTICAL_CENTER);
+  $active_sheet->setCellValue('V5', "ESFUERZO/" . "\r" . "RENDIMIENTO");
+  $active_sheet->getStyle('V5')->getAlignment()->setWrapText(true);
+  $active_sheet->mergeCells('V5:W5');
+  
+  $active_sheet->getStyle('Y5')->getFont()->setBold(true);
+  $active_sheet->getStyle('Y5:AA5')->getAlignment()->setVertical(
+      PHPExcel_Style_Alignment::VERTICAL_CENTER);
+  $active_sheet->setCellValue('Y5', "POSICIÓN" . "\r" . "GEOGRÁFICA");
+  $active_sheet->getStyle('Y5')->getAlignment()->setWrapText(true);
+  $active_sheet->mergeCells('Y5:AA5');
+  
+  $active_sheet->getStyle('V6:W6')->getFont()->setBold(true);
+  $active_sheet->getStyle('V6:V8')->getAlignment()->setVertical(
+      PHPExcel_Style_Alignment::VERTICAL_CENTER);
+  $active_sheet->setCellValue('V6', "LANCES");
+  $active_sheet->getStyle('V6')->getAlignment()->setWrapText(true);
+  $active_sheet->mergeCells('V6:V8');
+  
+  $active_sheet->getStyle('W6:W8')->getAlignment()->setVertical(
+      PHPExcel_Style_Alignment::VERTICAL_CENTER);
+  $active_sheet->setCellValue('W6', "T x L");
+  $active_sheet->getStyle('W6')->getAlignment()->setWrapText(true);
+  $active_sheet->mergeCells('W6:W8');
+  
+  $active_sheet->getStyle('Y6:AA6')->getFont()->setBold(true);
+  $active_sheet->getStyle('Y6:Y8')->getAlignment()->setVertical(
+      PHPExcel_Style_Alignment::VERTICAL_CENTER);
+  $active_sheet->setCellValue('Y6', "LAT");
+  $active_sheet->getStyle('Y6')->getAlignment()->setWrapText(true);
+  $active_sheet->mergeCells('Y6:Y8');
+    
+  $active_sheet->getStyle('Z6:Z8')->getAlignment()->setVertical(
+      PHPExcel_Style_Alignment::VERTICAL_CENTER);
+  $active_sheet->setCellValue('Z6', "LONG");
+  $active_sheet->getStyle('Z6')->getAlignment()->setWrapText(true);
+  $active_sheet->mergeCells('Z6:Z8');
+  
+  $active_sheet->getStyle('AA6:AA8')->getAlignment()->setVertical(
+      PHPExcel_Style_Alignment::VERTICAL_CENTER);
+  $active_sheet->setCellValue('AA6', "RBO" . "\r" . "GPS");
+  $active_sheet->getStyle('AA6')->getAlignment()->setWrapText(true);
+  $active_sheet->mergeCells('AA6:AA8');
+  
+  /* TOTALES */
+  $active_sheet->getStyle('A28:Q29')->getAlignment()->setVertical(
+      PHPExcel_Style_Alignment::HORIZONTAL_LEFT);
+  $active_sheet->setCellValue('A29', "TOTAL");
+  $active_sheet->getStyle('A29')->getAlignment()->setWrapText(true);
+  $active_sheet->mergeCells('B29:G29');
+  $active_sheet->mergeCells('Y29:AA29');
+  
+  $active_sheet->setCellValue('I29', $gran_total_monday);
+  $active_sheet->setCellValue('J29', $gran_total_tuesday);
+  $active_sheet->setCellValue('K29', $gran_total_wednesday);
+  $active_sheet->setCellValue('L29', $gran_total_thursday);
+  $active_sheet->setCellValue('M29', $gran_total_friday);
+  $active_sheet->setCellValue('N29', $gran_total_saturday);
+  $active_sheet->setCellValue('O29', $gran_total_sunday);
+  $active_sheet->setCellValue('P29', '=SUM(P9:P28)');
+  $active_sheet->setCellValue('Q29', '=SUM(Q9:Q28)');
+  
+  $active_sheet->getStyle('A55:AA55')->getAlignment()->setVertical(
+      PHPExcel_Style_Alignment::HORIZONTAL_LEFT);
+  $active_sheet->setCellValue('A55', "NOTA GENERAL");
+  $active_sheet->getStyle('A55')->getAlignment()->setWrapText(true);
+  $active_sheet->setCellValue('C55', getNotaGeneral());
+  $active_sheet->mergeCells('C55:AA55');
+  
+  $active_sheet->setCellValue('A34', 'BARCO');
+  //$active_sheet->getDefaultStyle()->getFont()->setSize(6);
+  $active_sheet->setCellValue('B34', 'TIEMPO');
+  $active_sheet->getStyle('B34')->applyFromArray($small_font);
+  $active_sheet->getStyle('B34')->getAlignment()->setTextRotation(90);
+  $active_sheet->setCellValue('C34', 'PRINCIPALES ACONTECIMIENTOS');
+  
+  
+  $active_sheet->mergeCells('A5:A8');
+  $active_sheet->mergeCells('B5:C8');
+  $active_sheet->mergeCells('D5:G5');
+  $active_sheet->mergeCells('D6:D8');
+  $active_sheet->mergeCells('F6:F8');
+  $active_sheet->mergeCells('G6:G8');
+  /* SHEET BORDER CLEANING */ 
+  
+  //$active_sheet->mergeCells('A1:AA4');
+  //$active_sheet->mergeCells('A30:AA33');
+  $active_sheet->mergeCells('A56:AA100');
+  //$active_sheet->mergeCells('B6:C6');
+  //$active_sheet->mergeCells('B7:C7');
+  //$active_sheet->mergeCells('B8:C8');
+  //$active_sheet->mergeCells('B33:B34');
+  //$active_sheet->mergeCells('C33:C34');
+  $active_sheet->mergeCells('C34:AA34');
+  for($i = 5; $i <= 28; $i++) {
+    $active_sheet->mergeCells('B' . $i . ':C'. $i);
+  }
+  /* Barcos */
+  $active_sheet->getStyle('A35:A54')->getAlignment()->setHorizontal(
+      PHPExcel_Style_Alignment::HORIZONTAL_LEFT);
+  
+  function printBarcoTecnico($obj, $cell, $id) {
+    $obj->setCellValue($cell, strtoupper(getBarcoName($id, 'barco_name')) 
+      . "\r" . getTecnico($id));
+    $obj->getStyle($cell)->getAlignment()->setWrapText(true);
+  }
+  
+  function printViaje($obj, $cell, $id) {
+    $obj->setCellValue($cell, $results_monday[$id]->viaje);
+  }
+  /* Azteca 1 */
+  $active_sheet->getStyle('A9:A28')->getAlignment()->setHorizontal(
+      PHPExcel_Style_Alignment::HORIZONTAL_LEFT);
+  printBarcoTecnico($active_sheet, 'A9', 0);
+  //printViaje($active_sheet, 'B9', 0);
+  $active_sheet->setCellValue('B9', $results_monday[0]->viaje);
+  $active_sheet->setCellValue('D9', statsViajes(0, 'dias_pesca'));
+  $active_sheet->setCellValue('F9', '');
+  $active_sheet->setCellValue('G9', '');
+  $active_sheet->setCellValue('H9', '');
+  $active_sheet->setCellValue('I9', $results_monday[0]->total_day);
+  $active_sheet->setCellValue('J9', $results_tuesday[0]->total_day);
+  $active_sheet->setCellValue('K9', $results_wednesday[0]->total_day);
+  $active_sheet->setCellValue('L9', $results_thursday[0]->total_day);
+  $active_sheet->setCellValue('M9', $results_friday[0]->total_day);
+  $active_sheet->setCellValue('N9', $results_saturday[0]->total_day);
+  $active_sheet->setCellValue('O9', $results_sunday[0]->total_day);
+  $active_sheet->setCellValue('P9', statsViajes(0, 'vacio'));
+  $active_sheet->setCellValue('Q9', statsViajes(0, 'abordo'));
+  $active_sheet->setCellValue('T9', statsViajes(0, 'tm_x_dia'));
+  $active_sheet->setCellValue('V9', statsViajes2(0, 'lances'));
+  $active_sheet->setCellValue('W9', statsViajes2(0, 'tons_x_lance'));
+  $active_sheet->setCellValue('Y9', $lat0);
+  $active_sheet->setCellValue('Z9', $lon0);
+  /* Azteca 2 */
+  printBarcoTecnico($active_sheet, 'A10', 2);
+  $active_sheet->setCellValue('B10', $results_monday[2]->viaje);
+  $active_sheet->setCellValue('D10', statsViajes(2, 'dias_pesca'));
+  $active_sheet->setCellValue('F10', '');
+  $active_sheet->setCellValue('G10', '');
+  $active_sheet->setCellValue('H10', '');
+  $active_sheet->setCellValue('I10', $results_monday[2]->total_day);
+  $active_sheet->setCellValue('J10', $results_tuesday[2]->total_day);
+  $active_sheet->setCellValue('K10', $results_wednesday[2]->total_day);
+  $active_sheet->setCellValue('L10', $results_thursday[2]->total_day);
+  $active_sheet->setCellValue('M10', $results_friday[2]->total_day);
+  $active_sheet->setCellValue('N10', $results_saturday[2]->total_day);
+  $active_sheet->setCellValue('O10', $results_sunday[2]->total_day);
+  $active_sheet->setCellValue('P10', statsViajes(2, 'vacio'));
+  $active_sheet->setCellValue('Q10', statsViajes(2, 'abordo'));
+  $active_sheet->setCellValue('T10', statsViajes(2, 'tm_x_dia'));
+  $active_sheet->setCellValue('V10', statsViajes2(2, 'lances'));
+  $active_sheet->setCellValue('W10', statsViajes2(2, 'tons_x_lance'));
+  $active_sheet->setCellValue('Y10', $lat2);
+  $active_sheet->setCellValue('Z10', $lon2);
+  /* AZTECA 3 */
+  printBarcoTecnico($active_sheet, 'A11', 3);
+  $active_sheet->setCellValue('B11', $results_monday[3]->viaje);
+  $active_sheet->setCellValue('D11', statsViajes(3, 'dias_pesca'));
+  $active_sheet->setCellValue('F11', '');
+  $active_sheet->setCellValue('G11', '');
+  $active_sheet->setCellValue('H11', '');
+  $active_sheet->setCellValue('I11', $results_monday[3]->total_day);
+  $active_sheet->setCellValue('J11', $results_tuesday[3]->total_day);
+  $active_sheet->setCellValue('K11', $results_wednesday[3]->total_day);
+  $active_sheet->setCellValue('L11', $results_thursday[3]->total_day);
+  $active_sheet->setCellValue('M11', $results_friday[3]->total_day);
+  $active_sheet->setCellValue('N11', $results_saturday[3]->total_day);
+  $active_sheet->setCellValue('O11', $results_sunday[3]->total_day);
+  $active_sheet->setCellValue('P11', statsViajes(3, 'vacio'));
+  $active_sheet->setCellValue('Q11', statsViajes(3, 'abordo'));
+  $active_sheet->setCellValue('T11', statsViajes(3, 'tm_x_dia'));
+  $active_sheet->setCellValue('V11', statsViajeS2(3, 'lances'));
+  $active_sheet->setCellValue('W11', statsViajes2(3, 'tons_x_lance'));
+  $active_sheet->setCellValue('Y11', $lat3);
+  $active_sheet->setCellValue('Z11', $lon3);
+  /* AZTECA 4 */
+  printBarcoTecnico($active_sheet, 'A12', 4);
+    $active_sheet->setCellValue('B12', $results_monday[4]->viaje);
+  $active_sheet->setCellValue('D12', statsViajes(4, 'dias_pesca'));
+  $active_sheet->setCellValue('F12', '');
+  $active_sheet->setCellValue('G12', '');
+  $active_sheet->setCellValue('H12', '');
+  $active_sheet->setCellValue('I12', $results_monday[4]->total_day);
+  $active_sheet->setCellValue('J12', $results_tuesday[4]->total_day);
+  $active_sheet->setCellValue('K12', $results_wednesday[4]->total_day);
+  $active_sheet->setCellValue('L12', $results_thursday[4]->total_day);
+  $active_sheet->setCellValue('M12', $results_friday[4]->total_day);
+  $active_sheet->setCellValue('N12', $results_saturday[4]->total_day);
+  $active_sheet->setCellValue('O12', $results_sunday[4]->total_day);
+  $active_sheet->setCellValue('P12', statsViajes(4, 'vacio'));
+  $active_sheet->setCellValue('Q12', statsViajes(4, 'abordo'));
+  $active_sheet->setCellValue('T12', statsViajes(4, 'tm_x_dia'));
+  $active_sheet->setCellValue('V12', statsViajeS2(4, 'lances'));
+  $active_sheet->setCellValue('W12', statsViajes2(4, 'tons_x_lance'));
+  $active_sheet->setCellValue('Y12', $lat4);
+  $active_sheet->setCellValue('Z12', $lon4);
+  /* AZTECA 5 */
+  printBarcoTecnico($active_sheet, 'A13', 5);
+  $active_sheet->setCellValue('B13', $results_monday[5]->viaje);
+  $active_sheet->setCellValue('D13', statsViajes(5, 'dias_pesca'));
+  $active_sheet->setCellValue('F13', '');
+  $active_sheet->setCellValue('G13', '');
+  $active_sheet->setCellValue('H13', '');
+  $active_sheet->setCellValue('I13', $results_monday[5]->total_day);
+  $active_sheet->setCellValue('J13', $results_tuesday[5]->total_day);
+  $active_sheet->setCellValue('K13', $results_wednesday[5]->total_day);
+  $active_sheet->setCellValue('L13', $results_thursday[5]->total_day);
+  $active_sheet->setCellValue('M13', $results_friday[5]->total_day);
+  $active_sheet->setCellValue('N13', $results_saturday[5]->total_day);
+  $active_sheet->setCellValue('O13', $results_sunday[5]->total_day);
+  $active_sheet->setCellValue('P13', statsViajes(5, 'vacio'));
+  $active_sheet->setCellValue('Q13', statsViajes(5, 'abordo'));
+  $active_sheet->setCellValue('T13', statsViajes(5, 'tm_x_dia'));
+  $active_sheet->setCellValue('V13', statsViajeS2(5, 'lances'));
+  $active_sheet->setCellValue('W13', statsViajes2(5, 'tons_x_lance'));
+  $active_sheet->setCellValue('Y13', $lat5);
+  $active_sheet->setCellValue('Z13', $lon5);
+  /* AZTECA 6 */
+  printBarcoTecnico($active_sheet, 'A14', 6);
+  $active_sheet->setCellValue('B14', $results_monday[6]->viaje);
+  $active_sheet->setCellValue('D14', statsViajes(6, 'dias_pesca'));
+  $active_sheet->setCellValue('F14', '');
+  $active_sheet->setCellValue('G14', '');
+  $active_sheet->setCellValue('H14', '');
+  $active_sheet->setCellValue('I14', $results_monday[6]->total_day);
+  $active_sheet->setCellValue('J14', $results_tuesday[6]->total_day);
+  $active_sheet->setCellValue('K14', $results_wednesday[6]->total_day);
+  $active_sheet->setCellValue('L14', $results_thursday[6]->total_day);
+  $active_sheet->setCellValue('M14', $results_friday[6]->total_day);
+  $active_sheet->setCellValue('N14', $results_saturday[6]->total_day);
+  $active_sheet->setCellValue('O14', $results_sunday[6]->total_day);
+  $active_sheet->setCellValue('P14', statsViajes(6, 'vacio'));
+  $active_sheet->setCellValue('Q14', statsViajes(6, 'abordo'));
+  $active_sheet->setCellValue('T14', statsViajes(6, 'tm_x_dia'));
+  $active_sheet->setCellValue('V14', statsViajeS2(6, 'lances'));
+  $active_sheet->setCellValue('W14', statsViajes2(6, 'tons_x_lance'));
+  $active_sheet->setCellValue('Y14', $lat6);
+  $active_sheet->setCellValue('Z14', $lon6);
+  /* AZTECA 7 */ 
+  printBarcoTecnico($active_sheet, 'A15', 7);
+  $active_sheet->setCellValue('B15', $results_monday[7]->viaje);
+  $active_sheet->setCellValue('D15', statsViajes(7, 'dias_pesca'));
+  $active_sheet->setCellValue('F15', '');
+  $active_sheet->setCellValue('G15', '');
+  $active_sheet->setCellValue('H15', '');
+  $active_sheet->setCellValue('I15', $results_monday[7]->total_day);
+  $active_sheet->setCellValue('J15', $results_tuesday[7]->total_day);
+  $active_sheet->setCellValue('K15', $results_wednesday[7]->total_day);
+  $active_sheet->setCellValue('L15', $results_thursday[7]->total_day);
+  $active_sheet->setCellValue('M15', $results_friday[7]->total_day);
+  $active_sheet->setCellValue('N15', $results_saturday[7]->total_day);
+  $active_sheet->setCellValue('O15', $results_sunday[7]->total_day);
+  $active_sheet->setCellValue('P15', statsViajes(7, 'vacio'));
+  $active_sheet->setCellValue('Q15', statsViajes(7, 'abordo'));
+  $active_sheet->setCellValue('T15', statsViajes(7, 'tm_x_dia'));
+  $active_sheet->setCellValue('V15', statsViajeS2(7, 'lances'));
+  $active_sheet->setCellValue('W15', statsViajes2(7, 'tons_x_lance'));
+  $active_sheet->setCellValue('Y15', $lat7);
+  $active_sheet->setCellValue('Z15', $lon7);
+  /* AZTECA 8 */
+  printBarcoTecnico($active_sheet, 'A16', 8);
+  $active_sheet->setCellValue('B16', $results_monday[8]->viaje);
+  $active_sheet->setCellValue('D16', statsViajes(8, 'dias_pesca'));
+  $active_sheet->setCellValue('F16', '');
+  $active_sheet->setCellValue('G16', '');
+  $active_sheet->setCellValue('H16', '');
+  $active_sheet->setCellValue('I16', $results_monday[8]->total_day);
+  $active_sheet->setCellValue('J16', $results_tuesday[8]->total_day);
+  $active_sheet->setCellValue('K16', $results_wednesday[8]->total_day);
+  $active_sheet->setCellValue('L16', $results_thursday[8]->total_day);
+  $active_sheet->setCellValue('M16', $results_friday[8]->total_day);
+  $active_sheet->setCellValue('N16', $results_saturday[8]->total_day);
+  $active_sheet->setCellValue('O16', $results_sunday[8]->total_day);
+  $active_sheet->setCellValue('P16', statsViajes(8, 'vacio'));
+  $active_sheet->setCellValue('Q16', statsViajes(8, 'abordo'));
+  $active_sheet->setCellValue('T16', statsViajes(8, 'tm_x_dia'));
+  $active_sheet->setCellValue('V16', statsViajeS2(8, 'lances'));
+  $active_sheet->setCellValue('W16', statsViajes2(8, 'tons_x_lance'));
+  $active_sheet->setCellValue('Y16', $lat8);
+  $active_sheet->setCellValue('Z16', $lon8);
+  /* AZTECA 9 */
+  printBarcoTecnico($active_sheet, 'A17', 9);
+  $active_sheet->setCellValue('B17', $results_monday[9]->viaje);
+  $active_sheet->setCellValue('D17', statsViajes(9, 'dias_pesca'));
+  $active_sheet->setCellValue('F17', '');
+  $active_sheet->setCellValue('G17', '');
+  $active_sheet->setCellValue('H17', '');
+  $active_sheet->setCellValue('I17', $results_monday[9]->total_day);
+  $active_sheet->setCellValue('J17', $results_tuesday[9]->total_day);
+  $active_sheet->setCellValue('K17', $results_wednesday[9]->total_day);
+  $active_sheet->setCellValue('L17', $results_thursday[9]->total_day);
+  $active_sheet->setCellValue('M17', $results_friday[9]->total_day);
+  $active_sheet->setCellValue('N17', $results_saturday[9]->total_day);
+  $active_sheet->setCellValue('O17', $results_sunday[9]->total_day);
+  $active_sheet->setCellValue('P17', statsViajes(9, 'vacio'));
+  $active_sheet->setCellValue('Q17', statsViajes(9, 'abordo'));
+  $active_sheet->setCellValue('T17', statsViajes(9, 'tm_x_dia'));
+  $active_sheet->setCellValue('V17', statsViajeS2(9, 'lances'));
+  $active_sheet->setCellValue('W17', statsViajes2(9, 'tons_x_lance'));
+  $active_sheet->setCellValue('Y17', $lat9);
+  $active_sheet->setCellValue('Z17', $lon9);
+  /* AZTECA 10 */
+  printBarcoTecnico($active_sheet, 'A18', 1);
+  $active_sheet->setCellValue('B18', $results_monday[1]->viaje);
+  $active_sheet->setCellValue('D18', statsViajes(1, 'dias_pesca'));
+  $active_sheet->setCellValue('F18', '');
+  $active_sheet->setCellValue('G18', '');
+  $active_sheet->setCellValue('H18', '');
+  $active_sheet->setCellValue('I18', $results_monday[1]->total_day);
+  $active_sheet->setCellValue('J18', $results_tuesday[1]->total_day);
+  $active_sheet->setCellValue('K18', $results_wednesday[1]->total_day);
+  $active_sheet->setCellValue('L18', $results_thursday[1]->total_day);
+  $active_sheet->setCellValue('M18', $results_friday[1]->total_day);
+  $active_sheet->setCellValue('N18', (isset($results_saturday[1]->total_day)) ? $results_saturday[1]->total_day : '');
+  $active_sheet->setCellValue('O18', $results_sunday[1]->total_day);
+  $active_sheet->setCellValue('P18', statsViajes(1, 'vacio'));
+  $active_sheet->setCellValue('Q18', statsViajes(1, 'abordo'));
+  $active_sheet->setCellValue('T18', statsViajes(1, 'tm_x_dia'));
+  $active_sheet->setCellValue('V18', statsViajeS2(1, 'lances'));
+  $active_sheet->setCellValue('W18', statsViajes2(1, 'tons_x_lance'));
+  $active_sheet->setCellValue('Y18', $lat1);
+  $active_sheet->setCellValue('Z18', $lon1);
+  /* MAZATUN */ 
+  printBarcoTecnico($active_sheet, 'A19', 15);
+  $active_sheet->setCellValue('B19', $results_monday[15]->viaje);
+  $active_sheet->setCellValue('D19', statsViajes(15, 'dias_pesca'));
+  $active_sheet->setCellValue('F19', '');
+  $active_sheet->setCellValue('G19', '');
+  $active_sheet->setCellValue('H19', '');
+  $active_sheet->setCellValue('I19', $results_monday[15]->total_day);
+  $active_sheet->setCellValue('J19', $results_tuesday[15]->total_day);
+  $active_sheet->setCellValue('K19', $results_wednesday[15]->total_day);
+  $active_sheet->setCellValue('L19', $results_thursday[15]->total_day);
+  $active_sheet->setCellValue('M19', $results_friday[15]->total_day);
+  $active_sheet->setCellValue('N19', $results_saturday[15]->total_day);
+  $active_sheet->setCellValue('O19', $results_sunday[15]->total_day);
+  $active_sheet->setCellValue('P19', statsViajes(15, 'vacio'));
+  $active_sheet->setCellValue('Q19', statsViajes(15, 'abordo'));
+  $active_sheet->setCellValue('T19', statsViajes(15, 'tm_x_dia'));
+  $active_sheet->setCellValue('V19', statsViajeS2(15, 'lances'));
+  $active_sheet->setCellValue('W19', statsViajes2(15, 'tons_x_lance'));
+  $active_sheet->setCellValue('Y19', $lat15);
+  $active_sheet->setCellValue('Z19', $lon15);
+  /* CLIPPERTON */ 
+  printBarcoTecnico($active_sheet, 'A20', 11);
+  $active_sheet->setCellValue('B20', $results_monday[11]->viaje);
+  $active_sheet->setCellValue('D20', statsViajes(11, 'dias_pesca'));
+  $active_sheet->setCellValue('F20', '');
+  $active_sheet->setCellValue('G20', '');
+  $active_sheet->setCellValue('H20', '');
+  $active_sheet->setCellValue('I20', $results_monday[11]->total_day);
+  $active_sheet->setCellValue('J20', $results_tuesday[11]->total_day);
+  $active_sheet->setCellValue('K20', $results_wednesday[11]->total_day);
+  $active_sheet->setCellValue('L20', $results_thursday[11]->total_day);
+  $active_sheet->setCellValue('M20', $results_friday[11]->total_day);
+  $active_sheet->setCellValue('N20', $results_saturday[11]->total_day);
+  $active_sheet->setCellValue('O20', $results_sunday[11]->total_day);
+  $active_sheet->setCellValue('P20', statsViajes(11, 'vacio'));
+  $active_sheet->setCellValue('Q20', statsViajes(11, 'abordo'));
+  $active_sheet->setCellValue('T20', statsViajes(11, 'tm_x_dia'));
+  $active_sheet->setCellValue('V20', statsViajeS2(11, 'lances'));
+  $active_sheet->setCellValue('W20', statsViajes2(11, 'tons_x_lance'));
+  $active_sheet->setCellValue('Y20', $lat11);
+  $active_sheet->setCellValue('Z20', $lon11);
+  /* EL DORADO */
+  printBarcoTecnico($active_sheet, 'A21', 12);
+  $active_sheet->setCellValue('B21', $results_monday[12]->viaje);
+  $active_sheet->setCellValue('D21', statsViajes(12, 'dias_pesca'));
+  $active_sheet->setCellValue('F21', '');
+  $active_sheet->setCellValue('G21', '');
+  $active_sheet->setCellValue('H21', '');
+  $active_sheet->setCellValue('I21', $results_monday[12]->total_day);
+  $active_sheet->setCellValue('J21', $results_tuesday[12]->total_day);
+  $active_sheet->setCellValue('K21', $results_wednesday[12]->total_day);
+  $active_sheet->setCellValue('L21', $results_thursday[12]->total_day);
+  $active_sheet->setCellValue('M21', $results_friday[12]->total_day);
+  $active_sheet->setCellValue('N21', $results_saturday[12]->total_day);
+  $active_sheet->setCellValue('O21', $results_sunday[12]->total_day);
+  $active_sheet->setCellValue('P21', statsViajes(12, 'vacio'));
+  $active_sheet->setCellValue('Q21', statsViajes(12, 'abordo'));
+  $active_sheet->setCellValue('T21', statsViajes(12, 'tm_x_dia'));
+  $active_sheet->setCellValue('V21', statsViajeS2(12, 'lances'));
+  $active_sheet->setCellValue('W21', statsViajes2(12, 'tons_x_lance'));
+  $active_sheet->setCellValue('Y21', $lat12);
+  $active_sheet->setCellValue('Z21', $lon12);
+  /* FRANZ */
+  printBarcoTecnico($active_sheet, 'A22', 13);
+  $active_sheet->setCellValue('B22', $results_monday[13]->viaje);
+  $active_sheet->setCellValue('D22', statsViajes(13, 'dias_pesca'));
+  $active_sheet->setCellValue('F22', '');
+  $active_sheet->setCellValue('G22', '');
+  $active_sheet->setCellValue('H22', '');
+  $active_sheet->setCellValue('I22', $results_monday[13]->total_day);
+  $active_sheet->setCellValue('J22', $results_tuesday[13]->total_day);
+  $active_sheet->setCellValue('K22', $results_wednesday[13]->total_day);
+  $active_sheet->setCellValue('L22', $results_thursday[13]->total_day);
+  $active_sheet->setCellValue('M22', $results_friday[13]->total_day);
+  $active_sheet->setCellValue('N22', $results_saturday[13]->total_day);
+  $active_sheet->setCellValue('O22', $results_sunday[13]->total_day);
+  $active_sheet->setCellValue('P22', statsViajes(13, 'vacio'));
+  $active_sheet->setCellValue('Q22', statsViajes(13, 'abordo'));
+  $active_sheet->setCellValue('T22', statsViajes(13, 'tm_x_dia'));
+  $active_sheet->setCellValue('V22', statsViajeS2(13, 'lances'));
+  $active_sheet->setCellValue('W22', statsViajes2(13, 'tons_x_lance'));
+  $active_sheet->setCellValue('Y22', $lat13);
+  $active_sheet->setCellValue('Z22', $lon13);
+  /* HANNA */
+  printBarcoTecnico($active_sheet, 'A23', 14);
+  $active_sheet->setCellValue('B23', $results_monday[14]->viaje);
+  $active_sheet->setCellValue('D23', statsViajes(14, 'dias_pesca'));
+  $active_sheet->setCellValue('F23', '');
+  $active_sheet->setCellValue('G23', '');
+  $active_sheet->setCellValue('H23', '');
+  $active_sheet->setCellValue('I23', $results_monday[14]->total_day);
+  $active_sheet->setCellValue('J23', $results_tuesday[14]->total_day);
+  $active_sheet->setCellValue('K23', $results_wednesday[14]->total_day);
+  $active_sheet->setCellValue('L23', $results_thursday[14]->total_day);
+  $active_sheet->setCellValue('M23', $results_friday[14]->total_day);
+  $active_sheet->setCellValue('N23', $results_saturday[14]->total_day);
+  $active_sheet->setCellValue('O23', $results_sunday[14]->total_day);
+  $active_sheet->setCellValue('P23', statsViajes(14, 'vacio'));
+  $active_sheet->setCellValue('Q23', statsViajes(14, 'abordo'));
+  $active_sheet->setCellValue('T23', statsViajes(14, 'tm_x_dia'));
+  $active_sheet->setCellValue('V23', statsViajeS2(14, 'lances'));
+  $active_sheet->setCellValue('W23', statsViajes2(14, 'tons_x_lance'));
+  $active_sheet->setCellValue('Y23', $lat14);
+  $active_sheet->setCellValue('Z23', $lon14);
+  /* TAMARA */
+  printBarcoTecnico($active_sheet, 'A24', 18);
+  $active_sheet->setCellValue('B24', $results_monday[18]->viaje);
+  $active_sheet->setCellValue('D24', statsViajes(18, 'dias_pesca'));
+  $active_sheet->setCellValue('F24', '');
+  $active_sheet->setCellValue('G24', '');
+  $active_sheet->setCellValue('H24', '');
+  $active_sheet->setCellValue('I24', $results_monday[18]->total_day);
+  $active_sheet->setCellValue('J24', $results_tuesday[18]->total_day);
+  $active_sheet->setCellValue('K24', $results_wednesday[18]->total_day);
+  $active_sheet->setCellValue('L24', $results_thursday[18]->total_day);
+  $active_sheet->setCellValue('M24', $results_friday[18]->total_day);
+  $active_sheet->setCellValue('N24', $results_saturday[18]->total_day);
+  $active_sheet->setCellValue('O24', $results_sunday[18]->total_day);
+  $active_sheet->setCellValue('P24', statsViajes(18, 'vacio'));
+  $active_sheet->setCellValue('Q24', statsViajes(18, 'abordo'));
+  $active_sheet->setCellValue('T24', statsViajes(18, 'tm_x_dia'));
+  $active_sheet->setCellValue('V24', statsViajeS2(18, 'lances'));
+  $active_sheet->setCellValue('W24', statsViajes2(18, 'tons_x_lance'));
+  $active_sheet->setCellValue('Y24', $lat18);
+  $active_sheet->setCellValue('Z24', $lon18);
+  /* CAMILA */
+  printBarcoTecnico($active_sheet, 'A25', 10);
+  $active_sheet->setCellValue('B25', $results_monday[10]->viaje);
+  $active_sheet->setCellValue('D25', statsViajes(10, 'dias_pesca'));
+  $active_sheet->setCellValue('F25', '');
+  $active_sheet->setCellValue('G25', '');
+  $active_sheet->setCellValue('H25', '');
+  $active_sheet->setCellValue('I25', $results_monday[10]->total_day);
+  $active_sheet->setCellValue('J25', $results_tuesday[10]->total_day);
+  $active_sheet->setCellValue('K25', $results_wednesday[10]->total_day);
+  $active_sheet->setCellValue('L25', $results_thursday[10]->total_day);
+  $active_sheet->setCellValue('M25', $results_friday[10]->total_day);
+  $active_sheet->setCellValue('N25', $results_saturday[10]->total_day);
+  $active_sheet->setCellValue('O25', $results_sunday[10]->total_day);
+  $active_sheet->setCellValue('P25', statsViajes(10, 'vacio'));
+  $active_sheet->setCellValue('Q25', statsViajes(10, 'abordo'));
+  $active_sheet->setCellValue('T25', statsViajes(10, 'tm_x_dia'));
+  $active_sheet->setCellValue('V25', statsViajeS2(10, 'lances'));
+  $active_sheet->setCellValue('W25', statsViajes2(10, 'tons_x_lance'));
+  $active_sheet->setCellValue('Y25', $lat10);
+  $active_sheet->setCellValue('Z25', $lon10);
+  /* PACO C */
+  printBarcoTecnico($active_sheet, 'A26', 17);
+  $active_sheet->setCellValue('B26', $results_monday[17]->viaje);
+  $active_sheet->setCellValue('D26', statsViajes(17, 'dias_pesca'));
+  $active_sheet->setCellValue('F26', '');
+  $active_sheet->setCellValue('G26', '');
+  $active_sheet->setCellValue('H26', '');
+  $active_sheet->setCellValue('I26', $results_monday[17]->total_day);
+  $active_sheet->setCellValue('J26', $results_tuesday[17]->total_day);
+  $active_sheet->setCellValue('K26', $results_wednesday[17]->total_day);
+  $active_sheet->setCellValue('L26', $results_thursday[17]->total_day);
+  $active_sheet->setCellValue('M26', $results_friday[17]->total_day);
+  $active_sheet->setCellValue('N26', $results_saturday[17]->total_day);
+  $active_sheet->setCellValue('O26', $results_sunday[17]->total_day);
+  $active_sheet->setCellValue('P26', statsViajes(17, 'vacio'));
+  $active_sheet->setCellValue('Q26', statsViajes(17, 'abordo'));
+  $active_sheet->setCellValue('T26', statsViajes(17, 'tm_x_dia'));
+  $active_sheet->setCellValue('V26', statsViajeS2(17, 'lances'));
+  $active_sheet->setCellValue('W26', statsViajes2(17, 'tons_x_lance'));
+  $active_sheet->setCellValue('Y26', $lat17);
+  $active_sheet->setCellValue('Z26', $lon17);
+  /* TITIS */
+  printBarcoTecnico($active_sheet, 'A27', 19);
+  $active_sheet->setCellValue('B27', $results_monday[19]->viaje);
+  $active_sheet->setCellValue('D27', statsViajes(19, 'dias_pesca'));
+  $active_sheet->setCellValue('F27', '');
+  $active_sheet->setCellValue('G27', '');
+  $active_sheet->setCellValue('H27', '');
+  $active_sheet->setCellValue('I27', $results_monday[19]->total_day);
+  $active_sheet->setCellValue('J27', $results_tuesday[19]->total_day);
+  $active_sheet->setCellValue('K27', $results_wednesday[19]->total_day);
+  $active_sheet->setCellValue('L27', $results_thursday[19]->total_day);
+  $active_sheet->setCellValue('M27', $results_friday[19]->total_day);
+  $active_sheet->setCellValue('N27', $results_saturday[19]->total_day);
+  $active_sheet->setCellValue('O27', $results_sunday[19]->total_day);
+  $active_sheet->setCellValue('P27', statsViajes(19, 'vacio'));
+  $active_sheet->setCellValue('Q27', statsViajes(19, 'abordo'));
+  $active_sheet->setCellValue('T27', statsViajes(19, 'tm_x_dia'));
+  $active_sheet->setCellValue('V27', statsViajeS2(19, 'lances'));
+  $active_sheet->setCellValue('W27', statsViajes2(19, 'tons_x_lance'));
+  $active_sheet->setCellValue('Y27', $lat19);
+  $active_sheet->setCellValue('Z27', $lon19);
+  /* MAZPESCA 2 */
+  printBarcoTecnico($active_sheet, 'A28', 16);
+  $active_sheet->setCellValue('B28', $results_monday[16]->viaje);
+  $active_sheet->setCellValue('D28', statsViajes(16, 'dias_pesca'));
+  $active_sheet->setCellValue('F28', '');
+  $active_sheet->setCellValue('G28', '');
+  $active_sheet->setCellValue('H28', '');
+  $active_sheet->setCellValue('I28', $results_monday[16]->total_day);
+  $active_sheet->setCellValue('J28', $results_tuesday[16]->total_day);
+  $active_sheet->setCellValue('K28', $results_wednesday[16]->total_day);
+  $active_sheet->setCellValue('L28', $results_thursday[16]->total_day);
+  $active_sheet->setCellValue('M28', $results_friday[16]->total_day);
+  $active_sheet->setCellValue('N28', (isset($results_saturday[16]->total_day)) 
+      ? $results_saturday[16]->total_day : '');
+  $active_sheet->setCellValue('O28', (isset($results_sunday[16]->total_day)) 
+      ? $results_sunday[16]->total_day : '');
+  $active_sheet->setCellValue('P28', statsViajes(16, 'vacio'));
+  $active_sheet->setCellValue('Q28', statsViajes(16, 'abordo'));
+  $active_sheet->setCellValue('T28', statsViajes(16, 'tm_x_dia'));
+  $active_sheet->setCellValue('V28', statsViajeS2(16, 'lances'));
+  $active_sheet->setCellValue('W28', statsViajes2(16, 'tons_x_lance'));
+  $active_sheet->setCellValue('Y28', $lat16);
+  $active_sheet->setCellValue('Z28', $lon16);
+  
+  /* COMENTARIOS */
+  printBarcoTecnico($active_sheet, 'A35', 0);
+  printBarcoTecnico($active_sheet, 'A36', 2);
+  printBarcoTecnico($active_sheet, 'A37', 3);
+  printBarcoTecnico($active_sheet, 'A38', 4);
+  printBarcoTecnico($active_sheet, 'A39', 5);
+  printBarcoTecnico($active_sheet, 'A40', 6);
+  printBarcoTecnico($active_sheet, 'A41', 7);
+  printBarcoTecnico($active_sheet, 'A42', 8);
+  printBarcoTecnico($active_sheet, 'A43', 9);
+  printBarcoTecnico($active_sheet, 'A44', 1);
+  printBarcoTecnico($active_sheet, 'A45', 15);
+  printBarcoTecnico($active_sheet, 'A46', 11);
+  printBarcoTecnico($active_sheet, 'A47', 12);
+  printBarcoTecnico($active_sheet, 'A48', 13);
+  printBarcoTecnico($active_sheet, 'A49', 14);
+  printBarcoTecnico($active_sheet, 'A50', 18);
+  printBarcoTecnico($active_sheet, 'A51', 10);
+  printBarcoTecnico($active_sheet, 'A52', 17);
+  printBarcoTecnico($active_sheet, 'A53', 19);
+  printBarcoTecnico($active_sheet, 'A54', 16);
+  /* Stats Alignment */  
+  $active_sheet->getStyle('A9:A29')->getAlignment()->setHorizontal(
+      PHPExcel_Style_Alignment::HORIZONTAL_LEFT);
+  $active_sheet->getStyle('A9:A29')->getAlignment()->setVertical(
+      PHPExcel_Style_Alignment::VERTICAL_CENTER);
+  
+  $active_sheet->getStyle('B9:AA29')->getAlignment()->setHorizontal(
+      PHPExcel_Style_Alignment::HORIZONTAL_CENTER);
+  $active_sheet->getStyle('B9:AA29')->getAlignment()->setVertical(
+      PHPExcel_Style_Alignment::VERTICAL_CENTER);
+  
+  /* Comentarios */
+  $active_sheet->getStyle('A35:C55')->getAlignment()->setHorizontal(
+      PHPExcel_Style_Alignment::HORIZONTAL_LEFT);
+  $active_sheet->getStyle('A35:C55')->getAlignment()->setVertical(
+      PHPExcel_Style_Alignment::VERTICAL_CENTER);
+  $active_sheet->getDefaultStyle()->getFont()->setSize(12);
+  $active_sheet->setCellValue('C35', getLastComment($results_monday[0]->viaje_nid));
+  $active_sheet->setCellValue('C36', getLastComment($results_monday[2]->viaje_nid));
+  $active_sheet->setCellValue('C37', getLastComment($results_monday[3]->viaje_nid));
+  $active_sheet->setCellValue('C38', getLastComment($results_monday[4]->viaje_nid));
+  $active_sheet->setCellValue('C39', getLastComment($results_monday[5]->viaje_nid));
+  $active_sheet->setCellValue('C40', getLastComment($results_monday[6]->viaje_nid));
+  $active_sheet->setCellValue('C41', getLastComment($results_monday[7]->viaje_nid));
+  $active_sheet->setCellValue('C42', getLastComment($results_monday[8]->viaje_nid));
+  $active_sheet->setCellValue('C43', getLastComment($results_monday[9]->viaje_nid));
+  $active_sheet->setCellValue('C44', getLastComment($results_monday[1]->viaje_nid));
+  $active_sheet->setCellValue('C45', getLastComment($results_monday[15]->viaje_nid));
+  $active_sheet->setCellValue('C46', getLastComment($results_monday[11]->viaje_nid));
+  $active_sheet->setCellValue('C47', getLastComment($results_monday[12]->viaje_nid));
+  $active_sheet->setCellValue('C48', getLastComment($results_monday[13]->viaje_nid));
+  $active_sheet->setCellValue('C49', getLastComment($results_monday[14]->viaje_nid));
+  $active_sheet->setCellValue('C50', getLastComment($results_monday[18]->viaje_nid));
+  $active_sheet->setCellValue('C51', getLastComment($results_monday[10]->viaje_nid));
+  $active_sheet->setCellValue('C52', getLastComment($results_monday[17]->viaje_nid));
+  $active_sheet->setCellValue('C53', getLastComment($results_monday[19]->viaje_nid));
+  $active_sheet->setCellValue('C54', getLastComment($results_monday[16]->viaje_nid));
+  for($i = 35; $i <= 54; $i++) {
+    $active_sheet->mergeCells('C' . $i . ':AA'. $i);
+  }
+  
+  //$active_sheet->mergeCells('C35:AA35');
+  // Rename worksheet
+  $objPHPExcel->getActiveSheet()->setTitle('Reporte Diario de la Flota');
+  // Set active sheet index to the first sheet, so Excel opens this as the first sheet
+  $objPHPExcel->setActiveSheetIndex(0);
+  // Redirect output to a client’s web browser (Excel5)
+  header('Content-Type: application/vnd.ms-excel');
+  header('Content-Disposition: attachment;filename="Reporte_Diario_Flota_del_' . 
+      $monday . '_al_' . $sunday . '.xls"');
+  header('Cache-Control: max-age=0');
+  // If you're serving to IE 9, then the following may be needed
+  header('Cache-Control: max-age=1');
+  // If you're serving to IE over SSL, then the following may be needed
+  header ('Expires: Mon, 26 Jul 1997 05:00:00 GMT'); // Date in the past
+  header ('Last-Modified: '.gmdate('D, d M Y H:i:s').' GMT'); // always modified
+  header ('Cache-Control: cache, must-revalidate'); // HTTP/1.1
+  header ('Pragma: public'); // HTTP/1.0
+  $objWriter = PHPExcel_IOFactory::createWriter($objPHPExcel, 'Excel5');
+  $objWriter->save('php://output');
+  exit;
+}
