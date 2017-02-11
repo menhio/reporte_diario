@@ -305,8 +305,8 @@ function capitalizeName($nom_tec, $pat_tec) {
   $paterno_tec = ucfirst(strtolower($pat_tec));
   //$materno_tec = ucfirst(strtolower($mat_tec));
   $full_name = $nombre_tec . ' ' . $paterno_tec;
-
-  return $full_name;
+  
+  return strtoupper($full_name);
 }
 
 function getDay($day) {
