@@ -309,6 +309,21 @@ function capitalizeName($nom_tec, $pat_tec) {
   return strtoupper($full_name);
 }
 
+/*
+ * Barcos en altamar del día de ayer.
+ */
+function barcosPescando() {
+  $table = 'barcos_altamar_view';
+  $query = db_select($table, 'n');
+  $query->addField('n', 'pescando', 'pescando');
+  //$query->condition('n.pescando', 'Altamar', '=');
+  //$query->addExpression('COUNT(n.field_ubicacion_diario_value)', 'pescando');
+  $exeResults = $query->execute();
+  $results = $exeResults->fetchAll();
+  
+  return $results[0]->pescando;
+}
+
 function getDay($day) {
 
   $barco = db_select('node', 'bnode2');
@@ -567,7 +582,7 @@ function reporteDiarioFlota() {
   $html .= '<tr>';
   //$html .= '<td>' . '</td>';
   /* Azteca 1 */
-  $html .= '<td>' . getBarcoName(0, 'barco_name') . '<br><small>' . getTecnico(0) . ' '
+  $html .= '<td>' . strtoupper(getBarcoName(0, 'barco_name')) . '<br><small>' . getTecnico(0) . ' '
       . '</small>' . '</td>';
   $html .= '<td>' . $results_monday[0]->viaje . '</td>';
   $html .= '<td>' . statsViajes(0, 'dias_pesca') . '</td>';
@@ -991,7 +1006,11 @@ function reporteDiarioFlota() {
   for($i = 0; $i <= 19; $i++) {
     $total_vacio += statsViajes($i, 'vacio');
     $total_abordo += statsViajes($i, 'abordo');
+    $total_tm_x_dia += statsViajes($i, 'tm_x_dia');
+    $total_tons_x_lance += statsViajes2($i, 'tons_x_lance');
   }
+  $prom_tm_x_dia = $total_tm_x_dia / barcosPescando();
+  $prom_tons_x_lance = $total_tons_x_lance / barcosPescando();
   $html .= '<tr>';
   $html .= '<td>' . 'TOTAL' . '</td>';
   $html .= '<td>' . '' . '</td>';
@@ -1005,9 +1024,9 @@ function reporteDiarioFlota() {
   $html .= '<td>' . $gran_total_sunday . '</td>';
   $html .= '<td>' . $total_vacio . '</td>';
   $html .= '<td>' . $total_abordo . '</td>';
+  $html .= '<td>' . number_format($prom_tm_x_dia, 2) . '</td>';
   $html .= '<td>' . '' . '</td>';
-  $html .= '<td>' . '' . '</td>';
-  $html .= '<td>' . '' . '</td>';
+  $html .= '<td>' . number_format($prom_tons_x_lance, 2) . '</td>';
   $html .= '<td>' . '' . '</td>';
   $html .= '<td>' . '' . '</td>';
   $html .= '</tr>';
@@ -1532,6 +1551,19 @@ function reporte_flota_export_excel() {
     PHPExcel_Style_Alignment::VERTICAL_CENTER);
   $active_sheet->setCellValue('J1', 'REPORTE DIARIO DE LA FLOTA');
   $active_sheet->mergeCells('J1:AA1');
+  
+  $active_sheet->getStyle('P3')->applyFromArray($total_style);
+  $active_sheet->getStyle('P3:AA3')->getAlignment()->setVertical(
+    PHPExcel_Style_Alignment::VERTICAL_CENTER);
+  
+  $days = array("Domingo","Lunes","Martes","Miercoles","Jueves","Viernes","Sábado");
+  $months = array("Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto",
+    "Septiembre","Octubre","Noviembre","Diciembre");
+  $fecha_completa =  $days[date('w')].", ".date('d')." de ".$months[date('n')-1] 
+      . " del ".date('Y') ;
+  
+  $active_sheet->setCellValue('P3', $fecha_completa);
+  $active_sheet->mergeCells('P3:AA3');
   
   $active_sheet->getStyle('H5:Q5')->getAlignment()->setVertical(
       PHPExcel_Style_Alignment::VERTICAL_CENTER);
@@ -2167,6 +2199,20 @@ function reporte_flota_export_excel() {
   $active_sheet->setCellValue('W28', statsViajes2(16, 'tons_x_lance'));
   $active_sheet->setCellValue('Y28', $lat16);
   $active_sheet->setCellValue('Z28', $lon16);
+  
+  /*
+   * Promedio TM x Dia
+   */
+  for($i = 0; $i <= 19; $i++) {
+    $total_vacio += statsViajes($i, 'vacio');
+    $total_abordo += statsViajes($i, 'abordo');
+    $total_tm_x_dia += statsViajes($i, 'tm_x_dia');
+    $total_tons_x_lance += statsViajes2($i, 'tons_x_lance');
+  }
+  $prom_tm_x_dia = $total_tm_x_dia / barcosPescando();
+  $prom_tons_x_lance = $total_tons_x_lance / barcosPescando();
+  $active_sheet->setCellValue('T29', number_format($prom_tm_x_dia, 2));
+  $active_sheet->setCellValue('W29', number_format($prom_tons_x_lance, 2));
   
   /* COMENTARIOS */
   printBarcoTecnico($active_sheet, 'A35', 0);
