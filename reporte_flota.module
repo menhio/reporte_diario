@@ -1568,8 +1568,12 @@ function reporte_flota_export_excel() {
   $active_sheet->getColumnDimension('X')->setWidth(2.00);
   $active_sheet->getRowDimension('5')->setRowHeight(33);
   $active_sheet->getRowDimension('9')->setRowHeight(35);
-  //$active_sheet->getColumnDimensionByColumn('B33')->setAutoSize(false);
-  //$active_sheet->getColumnDimensionByColumn('B')->setWidth(3.67);
+  $active_sheet->getRowDimension('29')->setRowHeight(35);
+  $active_sheet->getRowDimension('30')->setRowHeight(5);
+  $active_sheet->getRowDimension('32')->setRowHeight(5);
+  $active_sheet->getRowDimension('33')->setRowHeight(5);
+  $active_sheet->getRowDimension('55')->setRowHeight(35);
+  
   $active_sheet->getStyle('A5:A8')->getAlignment()->setVertical(
       PHPExcel_Style_Alignment::VERTICAL_CENTER);
   $active_sheet->setCellValue('A5', 'BARCO');
@@ -1784,7 +1788,7 @@ function reporte_flota_export_excel() {
   $active_sheet->getStyle('B34')->applyFromArray($small_font);
   $active_sheet->getStyle('B34')->getAlignment()->setTextRotation(90);
   $active_sheet->setCellValue('C34', 'PRINCIPALES ACONTECIMIENTOS');
-  
+  //$active_sheet->mergeCells('A33:AA34');
   
   $active_sheet->mergeCells('A5:A8');
   $active_sheet->mergeCells('B5:C8');
