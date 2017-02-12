@@ -1383,6 +1383,13 @@ function reporte_flota_export_excel() {
         'size'  => 11,
         'name' => 'Aria'
     ));
+  $font10 = array(
+    'font'  => array(
+        //'bold' => true,
+        //'color' => array('rgb' => 'FF0000'),
+        'size'  => 10,
+        'name' => 'Aria'
+    ));
   $barcos_style = array(
     'font'  => array(
         //'bold' => true,
@@ -1503,15 +1510,40 @@ function reporte_flota_export_excel() {
   $objPHPExcel->getActiveSheet()->getStyle('C34')->getFill()->setFillType(PHPExcel_Style_Fill::FILL_SOLID);
   $objPHPExcel->getActiveSheet()->getStyle('C34')->getFill()->getStartColor()->setRGB('83BB4B');
   
+  /*
+   * Alternating row colors
+   */
+  for($i = 10; $i <= 28; $i += 2) {
+    $active_sheet->getStyle('A' . $i . ':Q' . $i)->getFill()->setFillType(PHPExcel_Style_Fill::FILL_SOLID);
+    $active_sheet->getStyle('A' . $i . ':Q' . $i)->getFill()->getStartColor()->setRGB('D0E0AE');
+
+    $active_sheet->getStyle('T' . $i)->getFill()->setFillType(PHPExcel_Style_Fill::FILL_SOLID);
+    $active_sheet->getStyle('T' . $i)->getFill()->getStartColor()->setRGB('D0E0AE');
+
+    $active_sheet->getStyle('V' . $i . ':W' . $i)->getFill()->setFillType(PHPExcel_Style_Fill::FILL_SOLID);
+    $active_sheet->getStyle('V' . $i . ':W' . $i)->getFill()->getStartColor()->setRGB('D0E0AE');
+
+    $active_sheet->getStyle('Y' . $i . ':AA' . $i)->getFill()->setFillType(PHPExcel_Style_Fill::FILL_SOLID);
+    $active_sheet->getStyle('Y' . $i . ':AA' . $i)->getFill()->getStartColor()->setRGB('D0E0AE'); 
+  }
+  
+  for($i = 36; $i <= 54; $i += 2) {
+    $active_sheet->getStyle('A' . $i . ':Q' . $i)->getFill()->setFillType(PHPExcel_Style_Fill::FILL_SOLID);
+    $active_sheet->getStyle('A' . $i . ':Q' . $i)->getFill()->getStartColor()->setRGB('D0E0AE');
+    
+  }
+  
   $active_sheet->getStyle('A34:AA34')->getAlignment()->setVertical(
       PHPExcel_Style_Alignment::VERTICAL_CENTER);
   
   
   $active_sheet->getStyle('A5')->getFont()->setBold(true);
+  $active_sheet->getStyle('H5')->getFont()->setBold(true);
   //$active_sheet->getStyle('B5')->getFont()->setBold(true);
   $active_sheet->getStyle('A34')->getFont()->setBold(true);
   $active_sheet->getStyle('B34')->getFont()->setBold(true);
   $active_sheet->getStyle('C34')->getFont()->setBold(true);
+  
   //$active_sheet->getColumnDimensionByColumn('A33')->setAutoSize(false);
   $active_sheet->getColumnDimension('A')->setWidth(20.33);
   $active_sheet->getColumnDimension('B')->setWidth(3.50);
@@ -1715,6 +1747,19 @@ function reporte_flota_export_excel() {
   $active_sheet->getStyle('A29')->getAlignment()->setWrapText(true);
   $active_sheet->mergeCells('B29:G29');
   $active_sheet->mergeCells('Y29:AA29');
+  
+  /* Celda Medio */
+  $active_sheet->getStyle('A31:AA31')->applyFromArray($font10);
+  $active_sheet->getStyle('A31:AA31')->getAlignment()->setHorizontal(
+      PHPExcel_Style_Alignment::HORIZONTAL_LEFT);
+  
+  $active_sheet->setCellValue('A31', "TOTALES A LA FECHA:");
+  $active_sheet->setCellValue('B31', "DESCARGANDO(T.M.):");
+  $active_sheet->setCellValue('G31', "MAS ABORDO ESTIMADO:");
+  $active_sheet->mergeCells('G31:H31');  
+  $active_sheet->setCellValue('K31', "TOTAL CAPTURADO(T.M.):");
+  $active_sheet->setCellValue('Q31', "ESFUERZO DE PESCA:");
+  $active_sheet->mergeCells('Q31:T31');
   
   $active_sheet->setCellValue('I29', $gran_total_monday);
   $active_sheet->setCellValue('J29', $gran_total_tuesday);
