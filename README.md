@@ -1,2 +1,2 @@
 # reporte_diario
-Drupal and PHPExcel1_8 Integration
+Drupal, FORM API, Dynamic Queries and PHPExcel1_8 Integration
