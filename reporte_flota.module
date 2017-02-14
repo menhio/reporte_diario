@@ -266,7 +266,7 @@ function getBarcoName($id, $field) {
   $exeResults = $barco_name->execute();
   $results = $exeResults->fetchAll();
 
-  return $results[$id]->$field;
+  return strtoupper($results[$id]->$field);
 }
 
 function statsViajes($id, $field) {
@@ -580,7 +580,7 @@ function reporteDiarioFlota() {
   $html .= '<tr>';
   //$html .= '<td>' . '</td>';
   /* Azteca 1 */
-  $html .= '<td>' . strtoupper(getBarcoName(0, 'barco_name')) . '<br><small>' . getTecnico(0) . ' '
+  $html .= '<td>' . getBarcoName(0, 'barco_name') . '<br><small>' . getTecnico(0) . ' '
       . '</small>' . '</td>';
   $html .= '<td>' . $results_monday[0]->viaje . '</td>';
   $html .= '<td>' . statsViajes(0, 'dias_pesca') . '</td>';
