@@ -386,7 +386,9 @@ function getNotaGeneral() {
   return $comentario;
   
 }
-
+/*
+ * Function to create day in number by a given W and Y
+ */
 function createDayWeek($day_of_week) {
   
   $curr_week = date('W');
@@ -396,10 +398,6 @@ function createDayWeek($day_of_week) {
   $year = isset($_GET["year"]) ? check_plain($_GET["year"]) : $curr_year;
   
   $day = strtotime($year."W".str_pad($week_number,2,0,STR_PAD_LEFT).$day_of_week);
-  
-  //  $html .= '<p>' . "From " . date("l", $monday) . " " . date("j", $monday) .
-  //     " of " . date("F", $monday) . " of " . $year . " to " . date("l", $sunday)
-  //     . " " . date("j", $sunday) . " of " . date("F", $sunday) . " of " . $year . '</p>';
   
   return $day;
 }
@@ -539,13 +537,13 @@ function reporteDiarioFlota() {
   $html .= '<th>' . 'BARCO' . '</th>';
   $html .= '<th>' . 'VIAJE' . '</th>';
   $html .= '<th>' . 'VIAJE<br>ACTUAL' . '</th>';
-  $html .= '<th>' . 'LUN' . '</th>';
-  $html .= '<th>' . 'MAR' . '</th>';
-  $html .= '<th>' . 'MIER' . '</th>';
-  $html .= '<th>' . 'JUE' . '</th>';
-  $html .= '<th>' . 'VIE' . '</th>';
-  $html .= '<th>' . 'SAB' . '</th>';
-  $html .= '<th>' . 'DOM' . '</th>';
+  $html .= '<th>' . 'LUN<br>' . date('d', createDayWeek("1")) . '</th>';
+  $html .= '<th>' . 'MAR<br>' . date('d', createDayWeek("2")) . '</th>';
+  $html .= '<th>' . 'MIER<br>' . date('d', createDayWeek("3")) . '</th>';
+  $html .= '<th>' . 'JUE<br>' . date('d', createDayWeek("4")) . '</th>';
+  $html .= '<th>' . 'VIE<br>' . date('d', createDayWeek("5")) . '</th>';
+  $html .= '<th>' . 'SAB<br>' . date('d', createDayWeek("6")) . '</th>';
+  $html .= '<th>' . 'DOM<br>' . date('d', createDayWeek("7")) . '</th>';
   $html .= '<th>' . 'TANQUES<br>VACÍOS' . '</th>';
   $html .= '<th>' . 'ABORDO' . '</th>';
   $html .= '<th>' . 'TM<br>X<br>DÍA' . '</th>';
@@ -1627,43 +1625,43 @@ function reporte_flota_export_excel() {
   $active_sheet->getStyle('I6:Q6')->getFont()->setBold(true);
   $active_sheet->getStyle('I6:I8')->getAlignment()->setVertical(
       PHPExcel_Style_Alignment::VERTICAL_CENTER);
-  $active_sheet->setCellValue('I6', "LUN");
+  $active_sheet->setCellValue('I6', "LUN" . "\r" . date('d', createDayWeek("1")));
   $active_sheet->getStyle('I6')->getAlignment()->setWrapText(true);
   $active_sheet->mergeCells('I6:I8');
   
   $active_sheet->getStyle('J6:J8')->getAlignment()->setVertical(
       PHPExcel_Style_Alignment::VERTICAL_CENTER);
-  $active_sheet->setCellValue('J6', "MAR");
+  $active_sheet->setCellValue('J6', "MAR". "\r" . date('d', createDayWeek("2")));
   $active_sheet->getStyle('J6')->getAlignment()->setWrapText(true);
   $active_sheet->mergeCells('J6:J8');
   
   $active_sheet->getStyle('K6:K8')->getAlignment()->setVertical(
       PHPExcel_Style_Alignment::VERTICAL_CENTER);
-  $active_sheet->setCellValue('K6', "MIER");
+  $active_sheet->setCellValue('K6', "MIER". "\r" . date('d', createDayWeek("3")));
   $active_sheet->getStyle('K6')->getAlignment()->setWrapText(true);
   $active_sheet->mergeCells('K6:K8');
   
   $active_sheet->getStyle('L6:L8')->getAlignment()->setVertical(
       PHPExcel_Style_Alignment::VERTICAL_CENTER);
-  $active_sheet->setCellValue('L6', "JUE");
+  $active_sheet->setCellValue('L6', "JUE". "\r" . date('d', createDayWeek("4")));
   $active_sheet->getStyle('L6')->getAlignment()->setWrapText(true);
   $active_sheet->mergeCells('L6:L8');
   
   $active_sheet->getStyle('M6:M8')->getAlignment()->setVertical(
       PHPExcel_Style_Alignment::VERTICAL_CENTER);
-  $active_sheet->setCellValue('M6', "VIE");
+  $active_sheet->setCellValue('M6', "VIE". "\r" . date('d', createDayWeek("5")));
   $active_sheet->getStyle('M6')->getAlignment()->setWrapText(true);
   $active_sheet->mergeCells('M6:M8');
   
   $active_sheet->getStyle('N6:N8')->getAlignment()->setVertical(
       PHPExcel_Style_Alignment::VERTICAL_CENTER);
-  $active_sheet->setCellValue('N6', "SAB");
+  $active_sheet->setCellValue('N6', "SAB". "\r" . date('d', createDayWeek("6")));
   $active_sheet->getStyle('N6')->getAlignment()->setWrapText(true);
   $active_sheet->mergeCells('N6:N8');
   
   $active_sheet->getStyle('O6:O8')->getAlignment()->setVertical(
       PHPExcel_Style_Alignment::VERTICAL_CENTER);
-  $active_sheet->setCellValue('O6', "DOM");
+  $active_sheet->setCellValue('O6', "DOM". "\r" . date('d', createDayWeek("7")));
   $active_sheet->getStyle('O6')->getAlignment()->setWrapText(true);
   $active_sheet->mergeCells('O6:O8');
   
